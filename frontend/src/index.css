@@ -1,0 +1,214 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Jameel Noori Urdu font for Urdu content (make sure the font file exists at the given path) */
+@font-face {
+  font-family: 'JameelNooriNastaleeq';
+  src: url('/fonts/JameelNooriNastaleeq.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+}
+
+.urdu-text {
+  font-family: 'JameelNooriNastaleeq', 'Noto Nastaliq Urdu', 'Segoe UI', system-ui, sans-serif;
+}
+
+/* Toast Animation */
+@keyframes slide-in {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-in {
+  animation: slide-in 0.3s ease-out;
+}
+
+html,
+body {
+  margin: 0%;
+  padding: 0%;
+  box-sizing: border-box;
+  overflow-x: hidden;
+}
+
+/* Sidebar thin scrollbar */
+.sidebar-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background-color: rgba(148, 163, 184, 0.7); /* slate-400 */
+  border-radius: 9999px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(148, 163, 184, 0.9);
+}
+
+@media print {
+  /* Hide everything by default */
+  body * {
+    visibility: hidden;
+  }
+
+  /* Show the invoice modal (BillReceipt) and its content */
+  .print-wrapper,
+  .print-wrapper *,
+  .print-root,
+  .print-root * {
+    visibility: visible !important;
+  }
+
+  /* Also show Book PO print root when printing that page */
+  .book-po-print-root,
+  .book-po-print-root * {
+    visibility: visible !important;
+  }
+
+  /* Make Book PO chits start from top of page and centered */
+  .book-po-print-root {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    margin: 0 !important;
+    padding: 16px 24px;
+  }
+
+  .book-po-chit {
+    width: 100%;
+    max-width: 95%;
+    margin: 0 auto 16px auto;
+    box-sizing: border-box;
+    page-break-inside: avoid;
+    min-height: 46vh; /* slightly less than half page height so borders stay visible */
+    display: flex;
+    align-items: stretch;
+  }
+
+  .book-po-watermark {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) rotate(-25deg);
+    font-size: 56px;
+    font-weight: 600;
+    font-family: "Georgia", "Times New Roman", serif;
+    color: rgba(148, 163, 184, 0.1);
+    letter-spacing: 0.08em;
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* Normalize the overlay wrapper during print */
+  .print-wrapper {
+    position: static !important;
+    inset: auto !important;
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  .print-root {
+    position: static;
+    inset: auto;
+    max-width: 900px;
+    width: 100%;
+    margin: 0 auto;
+    box-shadow: none;
+    border-radius: 0;
+    padding: 18px 26px;
+    line-height: 1.6;
+    background: #ffffff;
+    /* Allow content to naturally flow across multiple printed pages */
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  /* Explicitly hide elements marked as no-print inside the printable area */
+  .no-print {
+    display: none !important;
+  }
+
+  /* Make bill content fully visible on paper (no inner scrollbars) */
+  .print-root #bill-content {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  .print-root h1,
+  .print-root h2,
+  .print-root h3 {
+    margin-bottom: 8px;
+  }
+
+  /* Extra spacing between sections */
+  .print-root #bill-content > div {
+    margin-bottom: 3px;
+  }
+
+  .print-root .bill-info-section {
+    margin-bottom: 2px !important;
+    padding-top: 2px !important;
+    padding-bottom: 2px !important;
+  }
+
+  .print-root .items-section {
+    padding-top: 2px !important;
+  }
+
+  .print-root table th,
+  .print-root table td {
+    padding-top: 2px;
+    padding-bottom: 2px;
+    font-size: 11px;
+  }
+
+  .print-root table,
+  .print-root table th,
+  .print-root table td {
+    border: none !important;
+  }
+
+  .print-root .border,
+  .print-root .border-b,
+  .print-root .border-t,
+  .print-root .border-l,
+  .print-root .border-r {
+    border-color: transparent !important;
+  }
+
+  .print-root .invoice-dotted-line {
+    border-bottom-color: rgba(148, 163, 184, 1) !important;
+    border-bottom-style: dashed !important;
+    border-bottom-width: 1px !important;
+  }
+
+  .bill-watermark {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) rotate(-32deg);
+    font-size: 64px;
+    font-weight: 600;
+    font-family: "Georgia", "Times New Roman", serif;
+    color: rgba(148, 163, 184, 0.12);
+    letter-spacing: 0.08em;
+    text-transform: none;
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 0;
+  }
+}
