@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   getFinancePurchases,
   createFinancePurchase,
+  updateFinancePurchase,
+  deleteFinancePurchase,
   getProducts,
   getFinanceBanks,
   getFinancePettyCash,
@@ -11,6 +13,7 @@ import Card, { CardBody, CardHeader, CardTitle } from '../../components/Card';
 import Button from '../../components/Button';
 import Modal from '../../components/Modal';
 import SearchBar from '../../components/SearchBar';
+import SearchableSelect from '../../components/SearchableSelect';
 import { useToast } from '../../context/ToastContext';
 import {
   Boxes,
@@ -22,7 +25,10 @@ import {
   AlertCircle,
   CheckCircle2,
   Trash2,
+  Edit2,
   Plus,
+  Truck,
+  Package,
 } from 'lucide-react';
 
 const FinancePurchases = () => {
@@ -30,21 +36,25 @@ const FinancePurchases = () => {
   const toast = useToast();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingBatchId, setEditingBatchId] = useState(null);
   const [search, setSearch] = useState('');
 
-  // New purchase form state
-  const [formData, setFormData] = useState({
+  // Purchase form state
+  const initialFormState = {
     supplierName: '',
     batchNumber: '',
     purchaseDate: new Date().toISOString().split('T')[0],
     notes: '',
+    courierExpense: '',
     paymentStatus: 'paid', // paid, partially_paid, unpaid
     paymentMethod: 'cash', // cash, bank, credit
     paidAmount: '',
     bankAccountId: '',
     dueDate: '',
     items: [{ productId: '', quantity: '', unitPrice: '' }],
-  });
+  };
+
+  const [formData, setFormData] = useState(initialFormState);
 
   // Queries
   const { data: purchases = [], isLoading } = useQuery({
@@ -79,8 +89,8 @@ const FinancePurchases = () => {
     },
   });
 
-  const accounts = banksData.accounts || [];
-  const currentPettyCash = pettyCashData.currentPettyCash || 0;
+  const accounts = (banksData.accounts || []).filter((a) => a.isActive !== false);
+  const currentPettyCash = Number(pettyCashData.currentPettyCash || 0);
 
   // Item helpers
   const addItemRow = () => {
@@ -102,7 +112,7 @@ const FinancePurchases = () => {
       const nextItems = [...prev.items];
       nextItems[idx] = { ...nextItems[idx], [field]: value };
       if (field === 'productId') {
-        const prod = products.find((p) => p._id === value);
+        const prod = products.find((p) => String(p._id) === String(value));
         if (prod && !nextItems[idx].unitPrice) {
           nextItems[idx].unitPrice = prod.originalPrice || '';
         }
@@ -111,41 +121,125 @@ const FinancePurchases = () => {
     });
   };
 
-  // Live total purchase cost calculation
-  const calculatedTotal = formData.items.reduce((sum, it) => {
-    const q = Number(it.quantity || 0);
-    const p = Number(it.unitPrice || 0);
-    return sum + q * p;
-  }, 0);
+  // Calculations
+  const itemsSubtotal = useMemo(() => {
+    return formData.items.reduce((sum, it) => {
+      const q = Number(it.quantity || 0);
+      const p = Number(it.unitPrice || 0);
+      return sum + (q > 0 && p >= 0 ? q * p : 0);
+    }, 0);
+  }, [formData.items]);
 
-  const purchaseMutation = useMutation({
-    mutationFn: (payload) => createFinancePurchase(payload),
+  const totalUnitsCount = useMemo(() => {
+    return formData.items.reduce((sum, it) => sum + Number(it.quantity || 0), 0);
+  }, [formData.items]);
+
+  const numCourierExpense = Number(formData.courierExpense || 0);
+  const courierPerUnit = totalUnitsCount > 0 ? numCourierExpense / totalUnitsCount : 0;
+  const calculatedTotal = itemsSubtotal + numCourierExpense;
+
+  // Selected bank account
+  const selectedBank = accounts.find((a) => String(a._id) === String(formData.bankAccountId));
+
+  // Invalidate queries helper
+  const invalidateAll = () => {
+    queryClient.invalidateQueries({ queryKey: ['financePurchases'] });
+    queryClient.invalidateQueries({ queryKey: ['purchase-batches'] });
+    queryClient.invalidateQueries({ queryKey: ['financeOverview'] });
+    queryClient.invalidateQueries({ queryKey: ['financeBanks'] });
+    queryClient.invalidateQueries({ queryKey: ['financePettyCash'] });
+    queryClient.invalidateQueries({ queryKey: ['financePayables'] });
+    queryClient.invalidateQueries({ queryKey: ['products'] });
+  };
+
+  // Save / Update mutation
+  const saveMutation = useMutation({
+    mutationFn: (payload) => {
+      if (editingBatchId) {
+        return updateFinancePurchase(editingBatchId, payload);
+      }
+      return createFinancePurchase(payload);
+    },
     onSuccess: () => {
-      toast.success('Purchase batch recorded and inventory updated successfully!');
+      toast.success(
+        editingBatchId
+          ? 'Purchase batch updated & balances reconciled successfully!'
+          : 'Purchase batch recorded & stock updated successfully!'
+      );
       setIsModalOpen(false);
-      setFormData({
-        supplierName: '',
-        batchNumber: '',
-        purchaseDate: new Date().toISOString().split('T')[0],
-        notes: '',
-        paymentStatus: 'paid',
-        paymentMethod: 'cash',
-        paidAmount: '',
-        bankAccountId: '',
-        dueDate: '',
-        items: [{ productId: '', quantity: '', unitPrice: '' }],
-      });
-      queryClient.invalidateQueries({ queryKey: ['financePurchases'] });
-      queryClient.invalidateQueries({ queryKey: ['financeOverview'] });
-      queryClient.invalidateQueries({ queryKey: ['financeBanks'] });
-      queryClient.invalidateQueries({ queryKey: ['financePettyCash'] });
-      queryClient.invalidateQueries({ queryKey: ['financePayables'] });
-      queryClient.invalidateQueries({ queryKey: ['products'] });
+      setEditingBatchId(null);
+      setFormData(initialFormState);
+      invalidateAll();
     },
     onError: (err) => {
-      toast.error(err.response?.data?.message || 'Failed to record purchase');
+      toast.error(err.response?.data?.message || 'Failed to save purchase');
     },
   });
+
+  // Delete mutation
+  const deleteMutation = useMutation({
+    mutationFn: (id) => deleteFinancePurchase(id),
+    onSuccess: () => {
+      toast.success('Purchase batch deleted, stock reversed, and payments refunded successfully!');
+      invalidateAll();
+    },
+    onError: (err) => {
+      toast.error(err.response?.data?.message || 'Failed to delete purchase');
+    },
+  });
+
+  const handleOpenCreateModal = () => {
+    setEditingBatchId(null);
+    setFormData(initialFormState);
+    setIsModalOpen(true);
+  };
+
+  const handleOpenEditModal = (batch) => {
+    setEditingBatchId(batch._id);
+    setFormData({
+      supplierName: batch.supplierName || '',
+      batchNumber: batch.batchNumber || '',
+      purchaseDate: batch.purchaseDate ? batch.purchaseDate.slice(0, 10) : '',
+      notes: batch.notes || '',
+      courierExpense: batch.courierExpense ?? '',
+      paymentStatus: batch.paymentStatus || 'paid',
+      paymentMethod: batch.paymentMethod || 'cash',
+      paidAmount: batch.paidAmount ?? '',
+      bankAccountId: batch.bankAccountId?._id || batch.bankAccountId || '',
+      dueDate: batch.dueDate ? batch.dueDate.slice(0, 10) : '',
+      items:
+        Array.isArray(batch.items) && batch.items.length > 0
+          ? batch.items.map((it) => ({
+              productId: it.productId?._id || it.productId || '',
+              quantity: it.quantity || '',
+              unitPrice: it.unitPrice || '',
+            }))
+          : [{ productId: '', quantity: '', unitPrice: '' }],
+    });
+    setIsModalOpen(true);
+  };
+
+  const handleDelete = (batch) => {
+    const paymentSourceLabel =
+      batch.paymentMethod === 'bank'
+        ? `Bank Account (${batch.bankAccountId?.bankName || 'Bank'})`
+        : 'Petty Cash';
+
+    const refundMsg =
+      batch.paidAmount > 0
+        ? `\n- Rs. ${Number(batch.paidAmount).toLocaleString('en-PK')} will be refunded back to ${paymentSourceLabel}.`
+        : '';
+
+    if (
+      !window.confirm(
+        `Are you sure you want to delete purchase batch "${batch.batchNumber || batch.supplierName}"?\n\n- All added products will have their stock reversed in inventory.${refundMsg}\n- Associated ledger & payable records will be voided.`
+      )
+    ) {
+      return;
+    }
+
+    deleteMutation.mutate(batch._id);
+  };
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -162,11 +256,38 @@ const FinancePurchases = () => {
       return toast.error('Please add at least one product with valid quantity and price');
     }
 
+    const actualPaid =
+      formData.paymentStatus === 'paid'
+        ? calculatedTotal
+        : formData.paymentStatus === 'partially_paid'
+        ? Number(formData.paidAmount || 0)
+        : 0;
+
+    // Validate balances
+    if (!editingBatchId && actualPaid > 0) {
+      if (formData.paymentMethod === 'cash' && actualPaid > currentPettyCash) {
+        return toast.error(
+          `Paid amount (Rs. ${actualPaid.toLocaleString('en-PK')}) exceeds available Petty Cash (Rs. ${currentPettyCash.toLocaleString('en-PK')})`
+        );
+      }
+      if (formData.paymentMethod === 'bank') {
+        if (!formData.bankAccountId) {
+          return toast.error('Please select a bank account');
+        }
+        if (selectedBank && actualPaid > Number(selectedBank.currentBalance || 0)) {
+          return toast.error(
+            `Paid amount exceeds ${selectedBank.bankName} balance (Rs. ${Number(selectedBank.currentBalance || 0).toLocaleString('en-PK')})`
+          );
+        }
+      }
+    }
+
     const payload = {
       supplierName: formData.supplierName,
       batchNumber: formData.batchNumber || undefined,
       purchaseDate: formData.purchaseDate,
       notes: formData.notes,
+      courierExpense: numCourierExpense,
       items: validItems.map((it) => ({
         productId: it.productId,
         quantity: Number(it.quantity),
@@ -174,17 +295,12 @@ const FinancePurchases = () => {
       })),
       paymentStatus: formData.paymentStatus,
       paymentMethod: formData.paymentMethod,
-      paidAmount:
-        formData.paymentStatus === 'paid'
-          ? calculatedTotal
-          : formData.paymentStatus === 'partially_paid'
-          ? Number(formData.paidAmount || 0)
-          : 0,
+      paidAmount: actualPaid,
       bankAccountId: formData.paymentMethod === 'bank' ? formData.bankAccountId : undefined,
       dueDate: formData.dueDate || undefined,
     };
 
-    purchaseMutation.mutate(payload);
+    saveMutation.mutate(payload);
   };
 
   const formatCur = (v) => `Rs. ${Number(v || 0).toLocaleString('en-PK', { maximumFractionDigits: 2 })}`;
@@ -194,7 +310,8 @@ const FinancePurchases = () => {
   const filteredPurchases = purchases.filter(
     (p) =>
       p.supplierName?.toLowerCase().includes(search.toLowerCase()) ||
-      p.batchNumber?.toLowerCase().includes(search.toLowerCase())
+      p.batchNumber?.toLowerCase().includes(search.toLowerCase()) ||
+      p.items?.some((it) => it.productId?.name?.toLowerCase().includes(search.toLowerCase()))
   );
 
   return (
@@ -209,13 +326,13 @@ const FinancePurchases = () => {
             {formatCur(purchases.reduce((s, p) => s + Number(p.totalAmount || 0), 0))}
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            {purchases.length} recorded purchase batches with integrated stock increment
+            {purchases.length} recorded purchase batches with integrated stock increment & landed cost tracking
           </p>
         </div>
 
         <Button
           variant="primary"
-          onClick={() => setIsModalOpen(true)}
+          onClick={handleOpenCreateModal}
           className="flex items-center gap-2 text-xs bg-slate-800 hover:bg-slate-900"
         >
           <PlusCircle className="w-4 h-4" />
@@ -228,15 +345,16 @@ const FinancePurchases = () => {
         <AlertCircle className="w-5 h-5 text-slate-500 flex-shrink-0 mt-0.5" />
         <p className="leading-relaxed">
           Purchasing stock does <strong>not</strong> count as an operating expense. Cash/bank is converted to inventory asset.
-          If purchased on credit (unpaid/partial), an <strong>Accounts Payable</strong> liability is automatically created for the supplier.
+          Courier/shipping costs entered are divided equally across all items in the batch to calculate the true landed cost price.
+          If purchased on credit, an <strong>Accounts Payable</strong> liability is automatically created for the supplier.
         </p>
       </div>
 
       {/* Table */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-          <SearchBar value={search} onChange={setSearch} placeholder="Search supplier or batch #..." />
-          <span className="text-xs text-slate-500">
+          <SearchBar value={search} onChange={setSearch} placeholder="Search supplier, batch #, or product name..." />
+          <span className="text-xs text-slate-500 font-medium">
             Showing {filteredPurchases.length} batches
           </span>
         </div>
@@ -248,23 +366,25 @@ const FinancePurchases = () => {
                 <th className="px-4 py-3">Batch / Date</th>
                 <th className="px-4 py-3">Supplier</th>
                 <th className="px-4 py-3">Items Included</th>
-                <th className="px-4 py-3">Payment Method</th>
+                <th className="px-4 py-3">Courier Cost</th>
+                <th className="px-4 py-3">Payment Source</th>
                 <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3 text-right">Total Cost</th>
+                <th className="px-4 py-3 text-right">Total Batch Cost</th>
                 <th className="px-4 py-3 text-right">Paid / Remaining</th>
+                <th className="px-4 py-3 text-center">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-700">
               {isLoading ? (
                 <tr>
-                  <td colSpan="7" className="text-center py-6 text-slate-400">
+                  <td colSpan="9" className="text-center py-8 text-slate-400">
                     Loading purchases...
                   </td>
                 </tr>
               ) : filteredPurchases.length === 0 ? (
                 <tr>
-                  <td colSpan="7" className="text-center py-6 text-slate-400">
-                    No purchase batches recorded.
+                  <td colSpan="9" className="text-center py-8 text-slate-400">
+                    No purchase batches found matching your criteria.
                   </td>
                 </tr>
               ) : (
@@ -278,16 +398,48 @@ const FinancePurchases = () => {
                     </td>
                     <td className="px-4 py-3 font-semibold text-slate-800">{batch.supplierName}</td>
                     <td className="px-4 py-3">
-                      <span className="text-slate-600 font-medium">
-                        {batch.items?.length || 0} product(s)
+                      <span className="text-slate-700 font-semibold">
+                        {batch.items?.reduce((s, it) => s + Number(it.quantity || 0), 0) || 0} unit(s)
                       </span>
-                      <p className="text-[10px] text-slate-400 truncate max-w-[200px]">
+                      <span className="text-slate-400 text-[10px] ml-1">
+                        ({batch.items?.length || 0} product types)
+                      </span>
+                      <p className="text-[10px] text-slate-500 truncate max-w-[200px] mt-0.5">
                         {batch.items?.map((it) => it.productId?.name || 'Item').join(', ')}
                       </p>
                     </td>
-                    <td className="px-4 py-3 uppercase text-[10px] font-semibold text-slate-600">
-                      {batch.paymentMethod || 'cash'}
-                      {batch.bankAccountId?.bankName && ` (${batch.bankAccountId.bankName})`}
+                    <td className="px-4 py-3">
+                      {batch.courierExpense > 0 ? (
+                        <div>
+                          <span className="font-semibold text-amber-700">
+                            {formatCur(batch.courierExpense)}
+                          </span>
+                          <p className="text-[10px] text-slate-400">
+                            (Rs. {Number(batch.items?.[0]?.courierExpensePerUnit || 0).toFixed(2)}/unit)
+                          </p>
+                        </div>
+                      ) : (
+                        <span className="text-slate-400">-</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {batch.paymentMethod === 'bank' ? (
+                        <span className="inline-flex items-center gap-1 font-semibold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded text-[10px]">
+                          <Building2 size={11} />
+                          {batch.bankAccountId?.bankName || 'Bank'}
+                          {batch.bankAccountId?.accountNumber ? ` (${batch.bankAccountId.accountNumber})` : ''}
+                        </span>
+                      ) : batch.paymentMethod === 'credit' ? (
+                        <span className="inline-flex items-center gap-1 font-semibold text-purple-700 bg-purple-50 border border-purple-200 px-2 py-0.5 rounded text-[10px]">
+                          <CreditCard size={11} />
+                          Credit / Udhaar
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded text-[10px]">
+                          <Wallet size={11} />
+                          Petty Cash
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <span
@@ -317,6 +469,26 @@ const FinancePurchases = () => {
                         </p>
                       )}
                     </td>
+                    <td className="px-4 py-3 text-center whitespace-nowrap">
+                      <div className="flex items-center justify-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEditModal(batch)}
+                          className="p-1 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded transition"
+                          title="Edit Purchase Batch"
+                        >
+                          <Edit2 size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(batch)}
+                          className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition"
+                          title="Delete Batch & Revert Stock/Balances"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))
               )}
@@ -325,8 +497,15 @@ const FinancePurchases = () => {
         </div>
       </div>
 
-      {/* New Purchase Modal */}
-      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Record New Purchase Batch">
+      {/* Record / Edit Purchase Modal */}
+      <Modal
+        isOpen={isModalOpen}
+        onClose={() => {
+          setIsModalOpen(false);
+          setEditingBatchId(null);
+        }}
+        title={editingBatchId ? `Edit Purchase Batch: ${formData.batchNumber || formData.supplierName}` : 'Record New Purchase Batch'}
+      >
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
@@ -371,93 +550,178 @@ const FinancePurchases = () => {
             </div>
             <div>
               <label className="block text-xs font-semibold text-gray-700 uppercase mb-1">
-                Notes
+                Notes / Reference
               </label>
               <input
                 type="text"
                 value={formData.notes}
                 onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                placeholder="Optional purchase details"
+                placeholder="Optional purchase notes"
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-slate-800 focus:outline-none"
               />
             </div>
           </div>
 
-          {/* Products Repeater */}
+          {/* Products Repeater with SearchableSelect */}
           <div className="border-t border-gray-200 pt-4">
             <div className="flex items-center justify-between mb-2">
-              <label className="text-xs font-bold text-gray-800 uppercase">
-                Stock Items to Add ({formData.items.length})
+              <label className="text-xs font-bold text-gray-800 uppercase flex items-center gap-1.5">
+                <Package size={14} className="text-blue-600" />
+                Products in this Batch ({formData.items.length})
               </label>
               <button
                 type="button"
                 onClick={addItemRow}
-                className="text-xs text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1"
+                className="text-xs text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1 bg-blue-50 px-2 py-1 rounded-md"
               >
                 <Plus className="w-3.5 h-3.5" /> Add Product Item
               </button>
             </div>
 
-            <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-              {formData.items.map((item, idx) => (
-                <div key={idx} className="flex gap-2 items-center bg-slate-50 p-2 rounded-lg">
-                  <div className="flex-1">
-                    <select
-                      value={item.productId}
-                      onChange={(e) => updateItemRow(idx, 'productId', e.target.value)}
-                      className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-xs focus:ring-2 focus:ring-slate-800 focus:outline-none"
-                      required
-                    >
-                      <option value="">Select Product...</option>
-                      {products.map((p) => (
-                        <option key={p._id} value={p._id}>
-                          {p.name} {p.model ? `(${p.model})` : ''} - Curr Stock: {p.stock || 0}
-                        </option>
-                      ))}
-                    </select>
+            <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
+              {formData.items.map((item, idx) => {
+                const effectiveUnitCost =
+                  Number(item.unitPrice || 0) + (totalUnitsCount > 0 ? courierPerUnit : 0);
+
+                return (
+                  <div key={idx} className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                    <div className="flex flex-col sm:flex-row gap-2 items-start sm:items-center">
+                      <div className="flex-1 w-full">
+                        <SearchableSelect
+                          options={products}
+                          value={item.productId}
+                          onChange={(val) => updateItemRow(idx, 'productId', val)}
+                          placeholder="Search product by name, model, barcode..."
+                          displayField="name"
+                          valueField="_id"
+                          searchFields={['name', 'model', 'category', 'barcode']}
+                          renderOption={(p) => (
+                            <div className="flex justify-between items-center text-xs">
+                              <div>
+                                <span className="font-semibold">{p.name}</span>
+                                {p.model && <span className="text-gray-500 ml-1">({p.model})</span>}
+                              </div>
+                              <span className="text-slate-500 font-mono text-[11px]">
+                                Stock: {p.stock || 0}
+                              </span>
+                            </div>
+                          )}
+                          required
+                        />
+                      </div>
+
+                      <div className="flex items-center gap-2 w-full sm:w-auto">
+                        <div className="w-24">
+                          <label className="block text-[10px] text-gray-500 uppercase font-semibold mb-0.5">
+                            Quantity
+                          </label>
+                          <input
+                            type="number"
+                            min="1"
+                            placeholder="Qty"
+                            value={item.quantity}
+                            onChange={(e) => updateItemRow(idx, 'quantity', e.target.value)}
+                            className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-right focus:ring-2 focus:ring-slate-800 focus:outline-none font-semibold"
+                            required
+                          />
+                        </div>
+
+                        <div className="w-28">
+                          <label className="block text-[10px] text-gray-500 uppercase font-semibold mb-0.5">
+                            Unit Price
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="any"
+                            placeholder="Cost Rs."
+                            value={item.unitPrice}
+                            onChange={(e) => updateItemRow(idx, 'unitPrice', e.target.value)}
+                            className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-right focus:ring-2 focus:ring-slate-800 focus:outline-none font-semibold"
+                            required
+                          />
+                        </div>
+
+                        {formData.items.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => removeItemRow(idx)}
+                            className="p-2 text-rose-500 hover:bg-rose-100 rounded-lg transition mt-4"
+                            title="Remove Item"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Landed Cost Breakdown per item */}
+                    {Number(item.quantity || 0) > 0 && Number(item.unitPrice || 0) > 0 && (
+                      <div className="flex items-center justify-between text-[11px] text-slate-500 bg-white px-2.5 py-1 rounded-lg border border-slate-100">
+                        <span>
+                          Subtotal: <strong>Rs. {(Number(item.quantity) * Number(item.unitPrice)).toLocaleString('en-PK')}</strong>
+                        </span>
+                        {courierPerUnit > 0 && (
+                          <span className="text-amber-700">
+                            + Courier: Rs. {courierPerUnit.toFixed(2)}/u ➡️ <strong>Landed Cost: Rs. {effectiveUnitCost.toFixed(2)}/unit</strong>
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
-                  <div className="w-24">
-                    <input
-                      type="number"
-                      min="1"
-                      placeholder="Qty"
-                      value={item.quantity}
-                      onChange={(e) => updateItemRow(idx, 'quantity', e.target.value)}
-                      className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-xs text-right focus:ring-2 focus:ring-slate-800 focus:outline-none"
-                      required
-                    />
-                  </div>
-                  <div className="w-32">
-                    <input
-                      type="number"
-                      min="0"
-                      step="any"
-                      placeholder="Unit Cost Rs."
-                      value={item.unitPrice}
-                      onChange={(e) => updateItemRow(idx, 'unitPrice', e.target.value)}
-                      className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-xs text-right focus:ring-2 focus:ring-slate-800 focus:outline-none"
-                      required
-                    />
-                  </div>
-                  {formData.items.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => removeItemRow(idx)}
-                      className="p-1.5 text-rose-500 hover:bg-rose-50 rounded"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
+          </div>
+
+          {/* Courier / Shipping Expense Allocation */}
+          <div className="bg-amber-50/80 border border-amber-200 rounded-xl p-3 space-y-2">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="space-y-0.5">
+                <label className="block text-xs font-bold text-amber-900 uppercase flex items-center gap-1.5">
+                  <Truck size={15} className="text-amber-700" />
+                  Courier / Freight Expense (Rs.)
+                </label>
+                <p className="text-[11px] text-amber-700">
+                  Equally divided on total units ({totalUnitsCount} units) to calculate product landed cost.
+                </p>
+              </div>
+              <div className="w-40">
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={formData.courierExpense}
+                  onChange={(e) => setFormData({ ...formData, courierExpense: e.target.value })}
+                  placeholder="0"
+                  className="w-full border border-amber-300 rounded-lg px-3 py-1.5 text-sm font-bold text-right bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            {totalUnitsCount > 0 && numCourierExpense > 0 && (
+              <div className="flex items-center justify-between text-xs text-amber-800 pt-2 border-t border-amber-200/80 font-medium">
+                <span>Total Items in Batch: <strong>{totalUnitsCount} units</strong></span>
+                <span>
+                  Courier Cost per Unit: <strong className="text-amber-900 font-bold">Rs. {courierPerUnit.toFixed(2)} / unit</strong>
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Payment Terms Section */}
           <div className="bg-slate-100 rounded-xl p-4 space-y-3">
-            <div className="flex justify-between items-center text-sm font-bold text-slate-800 pb-2 border-b border-slate-200">
-              <span>Total Batch Amount:</span>
-              <span className="text-lg text-slate-900">{formatCur(calculatedTotal)}</span>
+            <div className="flex flex-col sm:flex-row justify-between sm:items-center text-xs gap-1 pb-2 border-b border-slate-200">
+              <div className="space-x-2">
+                <span>Items Cost: <strong>{formatCur(itemsSubtotal)}</strong></span>
+                {numCourierExpense > 0 && (
+                  <span>+ Courier: <strong>{formatCur(numCourierExpense)}</strong></span>
+                )}
+              </div>
+              <div className="text-sm font-bold text-slate-800">
+                <span>Total Batch Amount: </span>
+                <span className="text-base text-slate-900 font-black">{formatCur(calculatedTotal)}</span>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
@@ -479,21 +743,21 @@ const FinancePurchases = () => {
               {formData.paymentStatus !== 'unpaid' && (
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">
-                    Payment Method *
+                    Deduct Payment From *
                   </label>
                   <select
                     value={formData.paymentMethod}
                     onChange={(e) => setFormData({ ...formData, paymentMethod: e.target.value })}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs bg-white focus:outline-none"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs bg-white focus:outline-none font-medium"
                   >
-                    <option value="cash">Petty Cash Drawer (Avail: {formatCur(currentPettyCash)})</option>
-                    <option value="bank">Bank Account</option>
+                    <option value="cash">💵 Petty Cash Drawer (Avail: {formatCur(currentPettyCash)})</option>
+                    <option value="bank">🏦 Bank Account</option>
                   </select>
                 </div>
               )}
 
               {formData.paymentStatus !== 'unpaid' && formData.paymentMethod === 'bank' && (
-                <div>
+                <div className="sm:col-span-2">
                   <label className="block font-semibold text-slate-700 mb-1">
                     Select Bank Account *
                   </label>
@@ -503,20 +767,25 @@ const FinancePurchases = () => {
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs bg-white focus:outline-none"
                     required
                   >
-                    <option value="">Choose Bank...</option>
+                    <option value="">-- Choose Bank Account --</option>
                     {accounts.map((a) => (
                       <option key={a._id} value={a._id}>
-                        {a.bankName} - {a.accountTitle} ({formatCur(a.currentBalance)})
+                        {a.bankName} - {a.accountTitle} ({a.accountNumber}) — Bal: {formatCur(a.currentBalance)}
                       </option>
                     ))}
                   </select>
+                  {selectedBank && (
+                    <p className="text-[11px] text-blue-700 mt-1">
+                      Available in {selectedBank.bankName}: <strong>{formatCur(selectedBank.currentBalance)}</strong>
+                    </p>
+                  )}
                 </div>
               )}
 
               {formData.paymentStatus === 'partially_paid' && (
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">
-                    Paid Amount (Rs.) *
+                    Paid Upfront Amount (Rs.) *
                   </label>
                   <input
                     type="number"
@@ -525,10 +794,13 @@ const FinancePurchases = () => {
                     step="any"
                     value={formData.paidAmount}
                     onChange={(e) => setFormData({ ...formData, paidAmount: e.target.value })}
-                    placeholder="Enter upfront payment"
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs bg-white focus:outline-none"
+                    placeholder="Enter advance payment"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs bg-white focus:outline-none font-semibold"
                     required
                   />
+                  <p className="text-[11px] text-rose-600 mt-1">
+                    Remaining debt to supplier: {formatCur(calculatedTotal - Number(formData.paidAmount || 0))}
+                  </p>
                 </div>
               )}
 
@@ -549,16 +821,27 @@ const FinancePurchases = () => {
           </div>
 
           <div className="flex justify-end gap-3 pt-3 border-t border-gray-200">
-            <Button type="button" variant="secondary" onClick={() => setIsModalOpen(false)}>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                setIsModalOpen(false);
+                setEditingBatchId(null);
+              }}
+            >
               Cancel
             </Button>
             <Button
               type="submit"
               variant="primary"
-              disabled={purchaseMutation.isPending}
+              disabled={saveMutation.isPending}
               className="bg-slate-800 hover:bg-slate-900 text-white"
             >
-              {purchaseMutation.isPending ? 'Processing...' : 'Confirm & Intake Stock'}
+              {saveMutation.isPending
+                ? 'Processing...'
+                : editingBatchId
+                ? 'Save Changes & Update Stock'
+                : 'Confirm & Intake Stock'}
             </Button>
           </div>
         </form>
@@ -568,4 +851,3 @@ const FinancePurchases = () => {
 };
 
 export default FinancePurchases;
-

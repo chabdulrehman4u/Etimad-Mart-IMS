@@ -24,6 +24,8 @@ import {
   addOwnerWithdrawal,
   getPurchases,
   createPurchase,
+  updatePurchase,
+  deletePurchase,
   getProfitAndLossReport,
   getCashFlowReport,
   getBusinessValueTrend,
@@ -72,6 +74,8 @@ router.post('/owner-capital/withdrawal', authorizeAdmin, addOwnerWithdrawal);
 // 7. Purchases
 router.get('/purchases', getPurchases);
 router.post('/purchases', createPurchase);
+router.put('/purchases/:id', updatePurchase);
+router.delete('/purchases/:id', deletePurchase);
 
 // 8. Reports
 router.get('/pnl', getProfitAndLossReport);

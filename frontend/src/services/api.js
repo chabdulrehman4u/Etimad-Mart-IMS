@@ -143,6 +143,8 @@ export const upsertDispatchRecord = (data) => api.post('/dispatch-records', data
 // Purchase Batches
 export const getPurchaseBatches = (params) => api.get('/purchase-batches', { params });
 export const createPurchaseBatch = (data) => api.post('/purchase-batches', data);
+export const updatePurchaseBatch = (id, data) => api.put(`/purchase-batches/${id}`, data);
+export const deletePurchaseBatch = (id) => api.delete(`/purchase-batches/${id}`);
 
 // LCS
 export const getLcsBookedPacketLastStatus = (params) => api.get('/lcs/booked-packets/last-status', { params });
@@ -177,6 +179,8 @@ export const addFinanceOwnerInvestment = (data) => api.post('/finance/owner-capi
 export const addFinanceOwnerWithdrawal = (data) => api.post('/finance/owner-capital/withdrawal', data);
 export const getFinancePurchases = (params) => api.get('/finance/purchases', { params });
 export const createFinancePurchase = (data) => api.post('/finance/purchases', data);
+export const updateFinancePurchase = (id, data) => api.put(`/finance/purchases/${id}`, data);
+export const deleteFinancePurchase = (id) => api.delete(`/finance/purchases/${id}`);
 export const getFinancePnL = (params) => api.get('/finance/pnl', { params });
 export const getFinanceCashFlow = (params) => api.get('/finance/cash-flow', { params });
 export const getFinanceTrend = (params) => api.get('/finance/trend', { params });
