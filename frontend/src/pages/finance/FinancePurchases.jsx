@@ -138,6 +138,35 @@ const FinancePurchases = () => {
   const courierPerUnit = totalUnitsCount > 0 ? numCourierExpense / totalUnitsCount : 0;
   const calculatedTotal = itemsSubtotal + numCourierExpense;
 
+  const editingBatch = useMemo(() => {
+    return editingBatchId ? (purchases || []).find((b) => b._id === editingBatchId) : null;
+  }, [editingBatchId, purchases]);
+
+  const oldPaidAmount = useMemo(() => {
+    if (!editingBatch) return 0;
+    if (editingBatch.paidAmount !== undefined && editingBatch.paidAmount !== null) {
+      return Number(editingBatch.paidAmount || 0);
+    }
+    if (editingBatch.paymentStatus === 'paid') {
+      return Number(editingBatch.totalAmount || 0);
+    }
+    if (editingBatch.paymentStatus === 'partially_paid') {
+      return Number(editingBatch.paidAmount || 0);
+    }
+    return 0;
+  }, [editingBatch]);
+
+  const currentPaid = useMemo(() => {
+    if (formData.paymentStatus === 'paid') return calculatedTotal;
+    if (formData.paymentStatus === 'partially_paid') return Number(formData.paidAmount || 0);
+    return 0;
+  }, [formData.paymentStatus, calculatedTotal, formData.paidAmount]);
+
+  const paymentDifference = useMemo(() => {
+    if (!editingBatchId) return 0;
+    return currentPaid - oldPaidAmount;
+  }, [editingBatchId, currentPaid, oldPaidAmount]);
+
   // Selected bank account
   const selectedBank = accounts.find((a) => String(a._id) === String(formData.bankAccountId));
 
@@ -263,7 +292,8 @@ const FinancePurchases = () => {
         ? Number(formData.paidAmount || 0)
         : 0;
 
-    // Validate balances
+    // Validate balances:
+    // If new purchase: validate full actualPaid
     if (!editingBatchId && actualPaid > 0) {
       if (formData.paymentMethod === 'cash' && actualPaid > currentPettyCash) {
         return toast.error(
@@ -277,6 +307,25 @@ const FinancePurchases = () => {
         if (selectedBank && actualPaid > Number(selectedBank.currentBalance || 0)) {
           return toast.error(
             `Paid amount exceeds ${selectedBank.bankName} balance (Rs. ${Number(selectedBank.currentBalance || 0).toLocaleString('en-PK')})`
+          );
+        }
+      }
+    }
+
+    // If editing purchase: validate only additional difference if positive
+    if (editingBatchId && paymentDifference > 0) {
+      if (formData.paymentMethod === 'cash' && paymentDifference > currentPettyCash) {
+        return toast.error(
+          `Additional difference (Rs. ${paymentDifference.toLocaleString('en-PK')}) exceeds available Petty Cash (Rs. ${currentPettyCash.toLocaleString('en-PK')})`
+        );
+      }
+      if (formData.paymentMethod === 'bank') {
+        if (!formData.bankAccountId) {
+          return toast.error('Please select a bank account');
+        }
+        if (selectedBank && paymentDifference > Number(selectedBank.currentBalance || 0)) {
+          return toast.error(
+            `Additional difference exceeds ${selectedBank.bankName} balance (Rs. ${Number(selectedBank.currentBalance || 0).toLocaleString('en-PK')})`
           );
         }
       }
@@ -723,6 +772,31 @@ const FinancePurchases = () => {
                 <span className="text-base text-slate-900 font-black">{formatCur(calculatedTotal)}</span>
               </div>
             </div>
+
+            {editingBatchId && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-2.5 text-xs flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <span className="text-blue-800 font-bold">Original Paid: </span>
+                  <span className="font-semibold text-slate-800">Rs. {oldPaidAmount.toLocaleString('en-PK')}</span>
+                </div>
+                <div>
+                  <span className="text-blue-800 font-bold">Adjustment Difference: </span>
+                  {paymentDifference > 0 ? (
+                    <span className="font-black text-rose-600 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
+                      +Rs. {paymentDifference.toLocaleString('en-PK')} (Will deduct difference from {formData.paymentMethod === 'bank' ? 'Bank' : 'Petty Cash'})
+                    </span>
+                  ) : paymentDifference < 0 ? (
+                    <span className="font-black text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                      -Rs. {Math.abs(paymentDifference).toLocaleString('en-PK')} (Will refund difference to {formData.paymentMethod === 'bank' ? 'Bank' : 'Petty Cash'})
+                    </span>
+                  ) : (
+                    <span className="font-medium text-slate-600">
+                      Rs. 0 (No extra payment needed)
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
               <div>

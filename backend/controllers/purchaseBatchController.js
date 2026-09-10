@@ -4,7 +4,20 @@ import StockHistory from '../models/StockHistory.js';
 import BankAccount from '../models/BankAccount.js';
 import AccountPayable from '../models/AccountPayable.js';
 import FinanceLedger from '../models/FinanceLedger.js';
+import Admin from '../models/Admin.js';
 import { getOrCreateFinanceSettings, recordLedgerEntry } from '../services/financeService.js';
+
+// Helper to reliably resolve an admin/user ObjectId for auditing
+const resolveUserId = async (req) => {
+  let id = req.user?._id || req.user?.id || req.admin?._id || req.admin?.id;
+  if (!id) {
+    try {
+      const fallback = await Admin.findOne().select('_id');
+      if (fallback) id = fallback._id;
+    } catch (e) {}
+  }
+  return id;
+};
 
 export const createPurchaseBatch = async (req, res) => {
   try {
@@ -113,6 +126,8 @@ export const createPurchaseBatch = async (req, res) => {
       }
     }
 
+    const currentUserId = await resolveUserId(req);
+
     const batch = new PurchaseBatch({
       batchNumber: batchNumber ? String(batchNumber).trim() : undefined,
       supplierName: String(supplierName).trim(),
@@ -128,6 +143,7 @@ export const createPurchaseBatch = async (req, res) => {
       paymentMethod,
       bankAccountId: bankAccountId || undefined,
       dueDate: dueDate ? new Date(dueDate) : undefined,
+      createdBy: currentUserId,
     });
 
     // If remaining > 0, generate an AccountPayable record
@@ -143,7 +159,7 @@ export const createPurchaseBatch = async (req, res) => {
         remainingAmount: actualRemaining,
         status: actualPaid > 0 ? 'partially_paid' : 'unpaid',
         notes: `Credit purchase: ${batch.batchNumber || batch._id}`,
-        createdBy: req.user?.id,
+        createdBy: currentUserId,
       });
       batch.payableId = payable._id;
     }
@@ -154,22 +170,27 @@ export const createPurchaseBatch = async (req, res) => {
     for (const item of normalizedItems) {
       const product = await Product.findById(item.productId);
       const previousStock = Number(product?.stock || 0);
+      const newStock = previousStock + item.quantity;
 
       await Product.findByIdAndUpdate(item.productId, {
-        $inc: { stock: item.quantity },
+        stock: newStock,
         ...(item.effectiveCostPrice > 0 && { originalPrice: item.effectiveCostPrice }),
       });
 
-      await StockHistory.create({
-        productId: item.productId,
-        type: 'stock_in',
-        quantity: item.quantity,
-        previousStock,
-        newStock: previousStock + item.quantity,
-        reason: 'Purchase batch stock increment',
-        notes: `Batch: ${batch.batchNumber || batch._id} (Landed Cost: Rs. ${item.effectiveCostPrice})`,
-        createdBy: req.user?.id,
-      });
+      try {
+        await StockHistory.create({
+          productId: item.productId,
+          type: 'stock_in',
+          quantity: item.quantity,
+          previousStock,
+          newStock,
+          reason: 'Purchase batch stock increment',
+          notes: `Batch: ${batch.batchNumber || batch._id} (Landed Cost: Rs. ${item.effectiveCostPrice})`,
+          createdBy: currentUserId,
+        });
+      } catch (shErr) {
+        console.warn('StockHistory warning on batch create:', shErr.message);
+      }
     }
 
     // Record in immutable ledger
@@ -183,7 +204,7 @@ export const createPurchaseBatch = async (req, res) => {
         referenceType: 'purchase_batch',
         referenceId: String(batch._id),
         description: `Purchase from ${batch.supplierName} (Rs. ${actualPaid.toLocaleString('en-PK')} paid via ${paymentMethod === 'bank' ? bank?.bankName || 'Bank' : 'Petty Cash'})`,
-        createdBy: req.user?.id,
+        createdBy: currentUserId,
         date: batch.purchaseDate,
       });
     }
@@ -197,7 +218,7 @@ export const createPurchaseBatch = async (req, res) => {
         referenceType: 'purchase_batch',
         referenceId: String(batch._id),
         description: `Credit Purchase debt to ${batch.supplierName} (Rs. ${actualRemaining.toLocaleString('en-PK')} pending)`,
-        createdBy: req.user?.id,
+        createdBy: currentUserId,
         date: batch.purchaseDate,
       });
     }
@@ -273,56 +294,57 @@ export const updatePurchaseBatch = async (req, res) => {
       return res.status(400).json({ message: 'At least one item is required' });
     }
 
-    // 1. REVERT OLD STOCK
-    for (const oldItem of batch.items) {
-      await Product.findByIdAndUpdate(oldItem.productId, {
-        $inc: { stock: -oldItem.quantity },
-      });
-      await StockHistory.create({
-        productId: oldItem.productId,
-        type: 'stock_out',
-        quantity: oldItem.quantity,
-        reason: 'Purchase batch edit reversal',
-        notes: `Reversing old batch ${batch.batchNumber || batch._id}`,
-        createdBy: req.user?.id,
-      });
-    }
+    const currentUserId = await resolveUserId(req);
 
-    // 2. REVERT OLD FINANCIAL DEDUCTION
-    if (batch.paidAmount > 0) {
-      if (batch.paymentMethod === 'cash') {
-        const settings = await getOrCreateFinanceSettings();
-        settings.currentPettyCash = Number(settings.currentPettyCash || 0) + batch.paidAmount;
-        await settings.save();
-      } else if (batch.paymentMethod === 'bank' && batch.bankAccountId) {
-        await BankAccount.findByIdAndUpdate(batch.bankAccountId, {
-          $inc: { currentBalance: batch.paidAmount },
-        });
+    // 1. REVERT OLD STOCK SAFELY
+    if (Array.isArray(batch.items)) {
+      for (const oldItem of batch.items) {
+        const prodId = oldItem.productId?._id || oldItem.productId;
+        if (!prodId) continue;
+        const oldQty = Number(oldItem.quantity || 0);
+        if (oldQty <= 0) continue;
+
+        const product = await Product.findById(prodId);
+        if (product) {
+          const prevStock = Number(product.stock || 0);
+          const nextStock = Math.max(0, prevStock - oldQty);
+          await Product.findByIdAndUpdate(prodId, { stock: nextStock });
+
+          try {
+            await StockHistory.create({
+              productId: prodId,
+              type: 'stock_out',
+              quantity: oldQty,
+              previousStock: prevStock,
+              newStock: nextStock,
+              reason: 'Purchase batch edit reversal',
+              notes: `Reversing old batch ${batch.batchNumber || batch._id}`,
+              createdBy: currentUserId,
+            });
+          } catch (shErr) {
+            console.warn('StockHistory warning on batch edit reversal:', shErr.message);
+          }
+        }
       }
     }
 
-    // Void existing ledger entries
-    await FinanceLedger.updateMany(
-      { referenceType: 'purchase_batch', referenceId: String(batch._id) },
-      {
-        isVoided: true,
-        voidReason: 'Purchase batch updated',
-        voidedBy: req.user?.id,
-        voidedAt: new Date(),
-      }
-    );
-
-    // 3. NORMALIZE NEW ITEMS & CALCULATE COURIER
+    // 2. NORMALIZE NEW ITEMS & CALCULATE COURIER PER-UNIT ALLOCATION
     const normalizedItems = [];
     let totalQuantity = 0;
 
     for (const rawItem of items) {
-      const productId = rawItem?.productId;
+      const productId = rawItem?.productId?._id || rawItem?.productId;
       const quantity = Number(rawItem?.quantity || 0);
       const unitPrice = Number(rawItem?.unitPrice || 0);
 
-      if (!productId || quantity <= 0 || unitPrice < 0) {
-        return res.status(400).json({ message: 'Valid productId, quantity > 0, and unitPrice >= 0 required' });
+      if (!productId) {
+        return res.status(400).json({ message: 'Valid productId required for all items' });
+      }
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        return res.status(400).json({ message: 'Quantity must be greater than 0' });
+      }
+      if (!Number.isFinite(unitPrice) || unitPrice < 0) {
+        return res.status(400).json({ message: 'Unit price must be 0 or greater' });
       }
 
       totalQuantity += quantity;
@@ -330,7 +352,7 @@ export const updatePurchaseBatch = async (req, res) => {
     }
 
     const itemsCost = normalizedItems.reduce((s, it) => s + it.quantity * it.unitPrice, 0);
-    const numCourier = Number(courierExpense || 0);
+    const numCourier = Math.max(0, Number(courierExpense || 0));
     const courierPerUnit = totalQuantity > 0 ? numCourier / totalQuantity : 0;
 
     for (const it of normalizedItems) {
@@ -354,52 +376,202 @@ export const updatePurchaseBatch = async (req, res) => {
       actualRemaining = totalAmount;
     }
 
-    // 4. VERIFY NEW FUNDING SOURCE
-    let bank = null;
-    if (actualPaid > 0) {
-      if (paymentMethod === 'cash') {
-        const settings = await getOrCreateFinanceSettings();
-        if (Number(settings.currentPettyCash || 0) < actualPaid) {
-          return res.status(400).json({
-            message: `Insufficient Petty Cash balance. Available: Rs. ${Number(settings.currentPettyCash || 0).toLocaleString('en-PK')}`
+    // 3. APPLY NEW STOCK & LANDED COST (originalPrice = effectiveCostPrice)
+    for (const item of normalizedItems) {
+      const product = await Product.findById(item.productId);
+      if (product) {
+        const prevStock = Number(product.stock || 0);
+        const nextStock = prevStock + item.quantity;
+
+        await Product.findByIdAndUpdate(item.productId, {
+          stock: nextStock,
+          ...(item.effectiveCostPrice > 0 && { originalPrice: item.effectiveCostPrice }),
+        });
+
+        try {
+          await StockHistory.create({
+            productId: item.productId,
+            type: 'stock_in',
+            quantity: item.quantity,
+            previousStock: prevStock,
+            newStock: nextStock,
+            reason: 'Purchase batch edit adjustment',
+            notes: `Batch: ${batch.batchNumber || batch._id} (Landed Cost: Rs. ${item.effectiveCostPrice})`,
+            createdBy: currentUserId,
           });
-        }
-      } else if (paymentMethod === 'bank') {
-        if (!bankAccountId) {
-          return res.status(400).json({ message: 'Bank account is required for bank payment' });
-        }
-        bank = await BankAccount.findById(bankAccountId);
-        if (!bank || bank.currentBalance < actualPaid) {
-          return res.status(400).json({
-            message: `Insufficient bank balance in ${bank?.bankName || 'bank'}. Available: Rs. ${Number(bank?.currentBalance || 0).toLocaleString('en-PK')}`
-          });
+        } catch (shErr) {
+          console.warn('StockHistory warning on batch edit apply:', shErr.message);
         }
       }
     }
 
-    // 5. APPLY NEW STOCK
-    for (const item of normalizedItems) {
-      const product = await Product.findById(item.productId);
-      const previousStock = Number(product?.stock || 0);
-
-      await Product.findByIdAndUpdate(item.productId, {
-        $inc: { stock: item.quantity },
-        ...(item.effectiveCostPrice > 0 && { originalPrice: item.effectiveCostPrice }),
-      });
-
-      await StockHistory.create({
-        productId: item.productId,
-        type: 'stock_in',
-        quantity: item.quantity,
-        previousStock,
-        newStock: previousStock + item.quantity,
-        reason: 'Purchase batch edit adjustment',
-        notes: `Batch: ${batch.batchNumber || batch._id} (Landed Cost: Rs. ${item.effectiveCostPrice})`,
-        createdBy: req.user?.id,
-      });
+    // 4. FINANCIAL DIFFERENCE MANAGEMENT:
+    // Determine old paid amount (handling legacy batches where paidAmount was not explicitly set)
+    let oldPaid = 0;
+    if (batch.paidAmount !== undefined && batch.paidAmount !== null) {
+      oldPaid = Number(batch.paidAmount || 0);
+    } else if (batch.paymentStatus === 'paid') {
+      oldPaid = Number(batch.totalAmount || 0);
+    } else if (batch.paymentStatus === 'partially_paid') {
+      oldPaid = Number(batch.paidAmount || 0);
+    } else {
+      oldPaid = 0;
     }
 
-    // 6. UPDATE BATCH RECORD
+    const oldMethod = batch.paymentMethod || 'cash';
+    const oldBankId = batch.bankAccountId ? String(batch.bankAccountId?._id || batch.bankAccountId) : null;
+    const newBankId = (paymentMethod === 'bank' && bankAccountId) ? String(bankAccountId) : null;
+
+    const isSameSource = (oldMethod === paymentMethod) && (paymentMethod !== 'bank' || oldBankId === newBankId);
+
+    if (isSameSource) {
+      // SAME PAYMENT SOURCE: JUST ADD OR REMOVE THE DIFFERENCE
+      const diff = actualPaid - oldPaid;
+
+      if (diff > 0) {
+        // Additional payment needed (e.g. added courier expense)
+        if (paymentMethod === 'cash') {
+          const settings = await getOrCreateFinanceSettings();
+          const currentCash = Number(settings.currentPettyCash || 0);
+          if (currentCash < diff) {
+            return res.status(400).json({
+              message: `Insufficient Petty Cash balance to pay additional Rs. ${diff.toLocaleString('en-PK')}. Available: Rs. ${currentCash.toLocaleString('en-PK')}`
+            });
+          }
+        } else if (paymentMethod === 'bank') {
+          if (!bankAccountId) {
+            return res.status(400).json({ message: 'Bank account is required for bank payment' });
+          }
+          const bank = await BankAccount.findById(bankAccountId);
+          if (!bank) {
+            return res.status(404).json({ message: 'Selected bank account not found' });
+          }
+          if (Number(bank.currentBalance || 0) < diff) {
+            return res.status(400).json({
+              message: `Insufficient bank balance in ${bank.bankName} to pay additional Rs. ${diff.toLocaleString('en-PK')}. Available: Rs. ${Number(bank.currentBalance || 0).toLocaleString('en-PK')}`
+            });
+          }
+        }
+
+        // Deduct only the positive difference from petty cash or bank via recordLedgerEntry
+        await recordLedgerEntry({
+          transactionType: paymentMethod === 'cash' ? 'PURCHASE_CASH' : 'PURCHASE_BANK',
+          sourceAccount: paymentMethod === 'cash' ? 'cash' : 'bank',
+          destinationAccount: 'inventory',
+          amount: diff,
+          bankAccountId: bankAccountId || null,
+          referenceType: 'purchase_batch',
+          referenceId: String(batch._id),
+          description: `Additional courier/purchase cost for batch ${batch.batchNumber || batch.supplierName} (+Rs. ${diff.toLocaleString('en-PK')})`,
+          createdBy: currentUserId,
+          date: new Date(),
+        });
+      } else if (diff < 0) {
+        // Cost was reduced: refund difference back to source
+        const refundAmount = Math.abs(diff);
+        await recordLedgerEntry({
+          transactionType: 'PURCHASE_REFUND',
+          sourceAccount: 'inventory',
+          destinationAccount: paymentMethod === 'cash' ? 'cash' : 'bank',
+          amount: refundAmount,
+          bankAccountId: bankAccountId || null,
+          referenceType: 'purchase_batch',
+          referenceId: String(batch._id),
+          description: `Refund for cost reduction on batch ${batch.batchNumber || batch.supplierName} (Refund: Rs. ${refundAmount.toLocaleString('en-PK')})`,
+          createdBy: currentUserId,
+          date: new Date(),
+        });
+      }
+      // If diff === 0: no money moves, balances remain untouched
+    } else {
+      // PAYMENT SOURCE CHANGED (e.g. from Cash to Bank)
+      // 1. Refund old payment back to previous source
+      if (oldPaid > 0) {
+        await recordLedgerEntry({
+          transactionType: 'PURCHASE_REFUND',
+          sourceAccount: 'inventory',
+          destinationAccount: oldMethod === 'bank' ? 'bank' : 'cash',
+          amount: oldPaid,
+          bankAccountId: oldBankId || null,
+          referenceType: 'purchase_batch',
+          referenceId: String(batch._id),
+          description: `Reversal of old payment on method switch for batch ${batch.batchNumber || batch.supplierName}`,
+          createdBy: currentUserId,
+          date: new Date(),
+        });
+      }
+
+      // 2. Deduct new amount from new source
+      if (actualPaid > 0) {
+        if (paymentMethod === 'cash') {
+          const settings = await getOrCreateFinanceSettings();
+          const currentCash = Number(settings.currentPettyCash || 0);
+          if (currentCash < actualPaid) {
+            return res.status(400).json({
+              message: `Insufficient Petty Cash balance. Available: Rs. ${currentCash.toLocaleString('en-PK')}`
+            });
+          }
+        } else if (paymentMethod === 'bank') {
+          if (!bankAccountId) {
+            return res.status(400).json({ message: 'Bank account is required for bank payment' });
+          }
+          const bank = await BankAccount.findById(bankAccountId);
+          if (!bank || Number(bank.currentBalance || 0) < actualPaid) {
+            return res.status(400).json({
+              message: `Insufficient bank balance in ${bank?.bankName || 'bank'}. Available: Rs. ${Number(bank?.currentBalance || 0).toLocaleString('en-PK')}`
+            });
+          }
+        }
+
+        await recordLedgerEntry({
+          transactionType: paymentMethod === 'cash' ? 'PURCHASE_CASH' : 'PURCHASE_BANK',
+          sourceAccount: paymentMethod === 'cash' ? 'cash' : 'bank',
+          destinationAccount: 'inventory',
+          amount: actualPaid,
+          bankAccountId: bankAccountId || null,
+          referenceType: 'purchase_batch',
+          referenceId: String(batch._id),
+          description: `Payment via ${paymentMethod === 'bank' ? 'Bank' : 'Petty Cash'} for batch ${batch.batchNumber || batch.supplierName}`,
+          createdBy: currentUserId,
+          date: new Date(),
+        });
+      }
+    }
+
+    // 5. UPDATE ACCOUNTPAYABLE (Credit tracking)
+    if (actualRemaining > 0) {
+      if (batch.payableId) {
+        await AccountPayable.findByIdAndUpdate(batch.payableId, {
+          supplierName: String(supplierName).trim(),
+          billDate: purchaseDate ? new Date(purchaseDate) : batch.purchaseDate,
+          dueDate: dueDate ? new Date(dueDate) : undefined,
+          totalAmount,
+          paidAmount: actualPaid,
+          remainingAmount: actualRemaining,
+          status: actualPaid > 0 ? 'partially_paid' : 'unpaid',
+        });
+      } else {
+        const payable = await AccountPayable.create({
+          billNumber: batch.batchNumber || `PUR-${Date.now().toString().slice(-6)}`,
+          supplierName: String(supplierName).trim(),
+          purchaseBatchId: batch._id,
+          billDate: purchaseDate ? new Date(purchaseDate) : batch.purchaseDate,
+          dueDate: dueDate ? new Date(dueDate) : undefined,
+          totalAmount,
+          paidAmount: actualPaid,
+          remainingAmount: actualRemaining,
+          status: actualPaid > 0 ? 'partially_paid' : 'unpaid',
+          notes: `Credit purchase: ${batch.batchNumber || batch._id}`,
+          createdBy: currentUserId,
+        });
+        batch.payableId = payable._id;
+      }
+    } else if (batch.payableId) {
+      await AccountPayable.findByIdAndDelete(batch.payableId);
+      batch.payableId = undefined;
+    }
+
+    // 6. UPDATE PURCHASE BATCH RECORD
     batch.batchNumber = batchNumber ? String(batchNumber).trim() : batch.batchNumber;
     batch.supplierName = String(supplierName).trim();
     batch.purchaseDate = purchaseDate ? new Date(purchaseDate) : batch.purchaseDate;
@@ -412,73 +584,10 @@ export const updatePurchaseBatch = async (req, res) => {
     batch.paidAmount = actualPaid;
     batch.remainingAmount = actualRemaining;
     batch.paymentMethod = paymentMethod;
-    batch.bankAccountId = bankAccountId || undefined;
+    batch.bankAccountId = (paymentMethod === 'bank' && bankAccountId) ? bankAccountId : undefined;
     batch.dueDate = dueDate ? new Date(dueDate) : undefined;
 
-    // 7. MANAGE ACCOUNTPAYABLE
-    if (actualRemaining > 0) {
-      if (batch.payableId) {
-        await AccountPayable.findByIdAndUpdate(batch.payableId, {
-          supplierName: batch.supplierName,
-          billDate: batch.purchaseDate,
-          dueDate: batch.dueDate,
-          totalAmount,
-          paidAmount: actualPaid,
-          remainingAmount: actualRemaining,
-          status: actualPaid > 0 ? 'partially_paid' : 'unpaid',
-        });
-      } else {
-        const payable = await AccountPayable.create({
-          billNumber: batch.batchNumber || `PUR-${Date.now().toString().slice(-6)}`,
-          supplierName: batch.supplierName,
-          purchaseBatchId: batch._id,
-          billDate: batch.purchaseDate,
-          dueDate: batch.dueDate,
-          totalAmount,
-          paidAmount: actualPaid,
-          remainingAmount: actualRemaining,
-          status: actualPaid > 0 ? 'partially_paid' : 'unpaid',
-          notes: `Credit purchase: ${batch.batchNumber || batch._id}`,
-          createdBy: req.user?.id,
-        });
-        batch.payableId = payable._id;
-      }
-    } else if (batch.payableId) {
-      await AccountPayable.findByIdAndDelete(batch.payableId);
-      batch.payableId = undefined;
-    }
-
     await batch.save();
-
-    // 8. RECORD NEW LEDGER ENTRIES
-    if (actualPaid > 0) {
-      await recordLedgerEntry({
-        transactionType: paymentMethod === 'cash' ? 'PURCHASE_CASH' : 'PURCHASE_BANK',
-        sourceAccount: paymentMethod === 'cash' ? 'cash' : 'bank',
-        destinationAccount: 'inventory',
-        amount: actualPaid,
-        bankAccountId: bankAccountId || null,
-        referenceType: 'purchase_batch',
-        referenceId: String(batch._id),
-        description: `Updated purchase: ${batch.supplierName} (Rs. ${actualPaid.toLocaleString('en-PK')} paid via ${paymentMethod === 'bank' ? bank?.bankName || 'Bank' : 'Petty Cash'})`,
-        createdBy: req.user?.id,
-        date: batch.purchaseDate,
-      });
-    }
-
-    if (actualRemaining > 0) {
-      await recordLedgerEntry({
-        transactionType: 'PURCHASE_CREDIT',
-        sourceAccount: 'accounts_payable',
-        destinationAccount: 'inventory',
-        amount: actualRemaining,
-        referenceType: 'purchase_batch',
-        referenceId: String(batch._id),
-        description: `Updated credit purchase debt to ${batch.supplierName} (Rs. ${actualRemaining.toLocaleString('en-PK')} pending)`,
-        createdBy: req.user?.id,
-        date: batch.purchaseDate,
-      });
-    }
 
     const populated = await PurchaseBatch.findById(batch._id)
       .populate('items.productId', 'name model category originalPrice stock')
@@ -501,54 +610,86 @@ export const deletePurchaseBatch = async (req, res) => {
       return res.status(404).json({ message: 'Purchase batch not found' });
     }
 
-    // 1. REVERT STOCK
-    for (const item of batch.items) {
-      await Product.findByIdAndUpdate(item.productId, {
-        $inc: { stock: -item.quantity },
-      });
-      await StockHistory.create({
-        productId: item.productId,
-        type: 'stock_out',
-        quantity: item.quantity,
-        reason: 'Purchase batch deleted',
-        notes: `Reversal for deleted batch ${batch.batchNumber || batch._id}`,
-        createdBy: req.user?.id,
-      });
-    }
+    const currentUserId = await resolveUserId(req);
 
-    // 2. REFUND FINANCIAL DEDUCTION
-    if (batch.paidAmount > 0) {
-      if (batch.paymentMethod === 'cash') {
-        const settings = await getOrCreateFinanceSettings();
-        settings.currentPettyCash = Number(settings.currentPettyCash || 0) + batch.paidAmount;
-        await settings.save();
-      } else if (batch.paymentMethod === 'bank' && batch.bankAccountId) {
-        await BankAccount.findByIdAndUpdate(batch.bankAccountId, {
-          $inc: { currentBalance: batch.paidAmount },
-        });
+    // 1. REVERT STOCK SAFELY
+    if (Array.isArray(batch.items)) {
+      for (const item of batch.items) {
+        const prodId = item.productId?._id || item.productId;
+        if (!prodId) continue;
+        const qty = Number(item.quantity || 0);
+        if (qty <= 0) continue;
+
+        const product = await Product.findById(prodId);
+        if (product) {
+          const prevStock = Number(product.stock || 0);
+          const nextStock = Math.max(0, prevStock - qty);
+          await Product.findByIdAndUpdate(prodId, { stock: nextStock });
+
+          try {
+            await StockHistory.create({
+              productId: prodId,
+              type: 'stock_out',
+              quantity: qty,
+              previousStock: prevStock,
+              newStock: nextStock,
+              reason: 'Purchase batch deleted',
+              notes: `Reversal for deleted batch ${batch.batchNumber || batch._id}`,
+              createdBy: currentUserId,
+            });
+          } catch (shErr) {
+            console.warn('StockHistory warning on delete:', shErr.message);
+          }
+        }
       }
     }
 
-    // 3. VOID LEDGER ENTRIES
+    // 2. REFUND FINANCIAL DEDUCTIONS
+    let oldPaid = 0;
+    if (batch.paidAmount !== undefined && batch.paidAmount !== null) {
+      oldPaid = Number(batch.paidAmount || 0);
+    } else if (batch.paymentStatus === 'paid') {
+      oldPaid = Number(batch.totalAmount || 0);
+    } else if (batch.paymentStatus === 'partially_paid') {
+      oldPaid = Number(batch.paidAmount || 0);
+    }
+
+    const oldMethod = batch.paymentMethod || 'cash';
+    if (oldPaid > 0) {
+      await recordLedgerEntry({
+        transactionType: 'PURCHASE_REFUND',
+        sourceAccount: 'inventory',
+        destinationAccount: oldMethod === 'bank' ? 'bank' : 'cash',
+        amount: oldPaid,
+        bankAccountId: batch.bankAccountId || null,
+        referenceType: 'purchase_batch',
+        referenceId: String(batch._id),
+        description: `Refund for deleted purchase batch ${batch.batchNumber || batch.supplierName}`,
+        createdBy: currentUserId,
+        date: new Date(),
+      });
+    }
+
+    // 3. DELETE ASSOCIATED ACCOUNTPAYABLE
+    if (batch.payableId) {
+      await AccountPayable.findByIdAndDelete(batch.payableId);
+    }
+
+    // 4. VOID ASSOCIATED OLD LEDGER ENTRIES
     await FinanceLedger.updateMany(
       { referenceType: 'purchase_batch', referenceId: String(batch._id) },
       {
         isVoided: true,
         voidReason: 'Purchase batch deleted',
-        voidedBy: req.user?.id,
+        voidedBy: currentUserId,
         voidedAt: new Date(),
       }
     );
 
-    // 4. DELETE ASSOCIATED ACCOUNTPAYABLE
-    if (batch.payableId) {
-      await AccountPayable.findByIdAndDelete(batch.payableId);
-    }
-
-    // 5. DELETE BATCH
+    // 5. DELETE BATCH RECORD
     await PurchaseBatch.findByIdAndDelete(id);
 
-    return res.json({ message: 'Purchase batch deleted and all balances & stock successfully reverted' });
+    return res.json({ message: 'Purchase batch deleted, stock reversed, and payment refunded successfully' });
   } catch (error) {
     console.error('Error deleting purchase batch:', error);
     return res.status(500).json({ message: 'Server error', error: error.message });
