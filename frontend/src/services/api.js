@@ -104,6 +104,7 @@ export const addBillPayment = (id, data) => api.post(`/bills/${id}/payments`, da
 // Expenses
 export const getExpenses = (params) => api.get('/expenses', { params });
 export const createExpense = (data) => api.post('/expenses', data);
+export const deleteExpense = (id) => api.delete(`/expenses/${id}`);
 export const getExpenseStats = () => api.get('/expenses/stats/overview');
 
 // Income
