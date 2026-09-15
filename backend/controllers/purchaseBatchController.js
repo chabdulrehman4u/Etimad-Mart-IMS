@@ -377,19 +377,15 @@ export const updatePurchaseBatch = async (req, res) => {
       }
     );
 
-    // 3. NORMALIZE NEW ITEMS & CALCULATE COURIER
-    // 2. NORMALIZE NEW ITEMS & CALCULATE COURIER PER-UNIT ALLOCATION
+    // 3. NORMALIZE NEW ITEMS & CALCULATE COURIER PER-UNIT ALLOCATION
     const normalizedItems = [];
     let totalQuantity = 0;
 
     for (const rawItem of items) {
-      const productId = rawItem?.productId;
       const productId = rawItem?.productId?._id || rawItem?.productId;
       const quantity = Number(rawItem?.quantity || 0);
       const unitPrice = Number(rawItem?.unitPrice || 0);
 
-      if (!productId || quantity <= 0 || unitPrice < 0) {
-        return res.status(400).json({ message: 'Valid productId, quantity > 0, and unitPrice >= 0 required' });
       if (!productId) {
         return res.status(400).json({ message: 'Valid productId required for all items' });
       }
@@ -405,7 +401,6 @@ export const updatePurchaseBatch = async (req, res) => {
     }
 
     const itemsCost = normalizedItems.reduce((s, it) => s + it.quantity * it.unitPrice, 0);
-    const numCourier = Number(courierExpense || 0);
     const numCourier = Math.max(0, Number(courierExpense || 0));
     const courierPerUnit = totalQuantity > 0 ? numCourier / totalQuantity : 0;
 
