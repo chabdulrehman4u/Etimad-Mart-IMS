@@ -49,6 +49,14 @@ const sellerSchema = new mongoose.Schema({
     type: Boolean,
     default: true
   },
+  joiningDate: {
+    type: Date,
+    default: Date.now
+  },
+  notes: {
+    type: String,
+    trim: true
+  },
   resetPasswordToken: {
     type: String
   },

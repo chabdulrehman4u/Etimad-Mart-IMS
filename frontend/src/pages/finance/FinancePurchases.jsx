@@ -292,6 +292,7 @@ const FinancePurchases = () => {
         ? Number(formData.paidAmount || 0)
         : 0;
 
+    // Validate balances
     // Validate balances:
     // If new purchase: validate full actualPaid
     if (!editingBatchId && actualPaid > 0) {

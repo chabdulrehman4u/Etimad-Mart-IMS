@@ -187,4 +187,21 @@ export const getFinanceTrend = (params) => api.get('/finance/trend', { params })
 export const getFinanceLedger = (params) => api.get('/finance/ledger', { params });
 export const voidFinanceLedger = (id, data) => api.post(`/finance/ledger/${id}/void`, data);
 
+// Seller Dispatch & Accounting
+export const createSellerDispatch = (data) => api.post('/seller-dispatch', data);
+export const getSellerDispatches = (params) => api.get('/seller-dispatch', { params });
+export const getSellerDispatchById = (id) => api.get(`/seller-dispatch/${id}`);
+export const updateSellerDeliveryStatus = (id, data) => api.patch(`/seller-dispatch/${id}/delivery-status`, data);
+export const restoreSellerReturnedStock = (id, data) => api.post(`/seller-dispatch/${id}/restore-stock`, data);
+export const confirmSellerPayment = (id, data) => api.post(`/seller-dispatch/${id}/confirm-payment`, data);
+export const settleSellerPayout = (data) => api.post('/seller-dispatch/settle', data);
+export const recordSellerRemittance = (data) => api.post('/seller-dispatch/remittance', data);
+export const getSellerFinancialSummary = (params) => api.get('/seller-dispatch/summary', { params });
+export const getSellerLedger = (params) => api.get('/seller-dispatch/ledger', { params });
+export const getSellerReports = (params) => api.get('/seller-dispatch/reports', { params });
+export const getSellerDashboardAlerts = () => api.get('/seller-dispatch/alerts');
+export const getDashboardAlerts = getSellerDashboardAlerts;
+export const getBanks = getFinanceBanks;
+export const getPettyCash = getFinancePettyCash;
+
 export default api;

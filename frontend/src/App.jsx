@@ -11,7 +11,7 @@ const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Products = lazy(() => import('./pages/Products'));
-const Sellers = lazy(() => import('./pages/Sellers'));
+const SellerWorkspace = lazy(() => import('./pages/sellers/SellerWorkspace'));
 const Customers = lazy(() => import('./pages/Customers'));
 const Billing = lazy(() => import('./pages/Billing'));
 const EditBill = lazy(() => import('./pages/EditBill'));
@@ -61,7 +61,8 @@ const App = () => {
                 <Route index element={<Dashboard />} />
                 <Route path="admin-management" element={<AdminManagement />} />
                 <Route path="products" element={<Products />} />
-                <Route path="sellers" element={<Sellers />} />
+                <Route path="sellers" element={<SellerWorkspace />} />
+                <Route path="sellers/*" element={<SellerWorkspace />} />
                 <Route path="customers" element={<Customers />} />
                 <Route path="billing" element={<Billing />} />
                 <Route path="billing/edit/:id" element={<EditBill />} />

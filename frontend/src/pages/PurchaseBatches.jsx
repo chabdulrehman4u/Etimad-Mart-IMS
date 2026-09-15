@@ -289,6 +289,7 @@ const PurchaseBatches = () => {
         ? Number(paidAmount || 0)
         : 0;
 
+    // Balance checks on creation
     // Balance checks:
     // If new batch: check full actualPaid
     if (!editingBatchId && actualPaid > 0) {
