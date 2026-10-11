@@ -92,21 +92,38 @@ export const getStorefrontCatalog = async (req, res) => {
 
     const formatted = products.map((p) => {
       const price = Number(p.websitePrice || p.retailPrice || 0);
+      const title = p.model ? `${p.name} ${p.model}` : p.name;
+      const slug = (p.model ? `${p.name}-${p.model}` : p.name)
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/(^-|-$)/g, '');
       return {
         _id: p._id,
+        id: p._id,
         name: p.name,
+        title,
         model: p.model,
+        slug,
         category: p.category,
-        price,
+        price: Math.round(price * 1.15), // Crossed-out MSRP anchor
+        salePrice: price,
         websitePrice: Number(p.websitePrice || 0),
         retailPrice: Number(p.retailPrice || 0),
         inStock: Number(p.stock || 0) > 0,
         stock: Number(p.stock || 0),
         barcode: p.barcode || '',
+        freeShipping: false,
+        images: [
+          {
+            url: `https://images.unsplash.com/photo-1585747860715-2ba37e788b70?auto=format&fit=crop&w=400&q=80`,
+            alt: title,
+          },
+        ],
       };
     });
 
     res.json({
+      success: true,
       store: {
         name: tenant.name,
         slug: tenant.slug,
@@ -148,18 +165,28 @@ export const getStorefrontProduct = async (req, res) => {
     }
 
     const price = Number(product.websitePrice || product.retailPrice || 0);
+    const title = product.model ? `${product.name} ${product.model}` : product.name;
 
     res.json({
+      success: true,
       _id: product._id,
       name: product.name,
+      title,
       model: product.model,
       category: product.category,
-      price,
+      price: Math.round(price * 1.15),
+      salePrice: price,
       websitePrice: Number(product.websitePrice || 0),
       retailPrice: Number(product.retailPrice || 0),
       inStock: Number(product.stock || 0) > 0,
       stock: Number(product.stock || 0),
       barcode: product.barcode || '',
+      images: [
+        {
+          url: `https://images.unsplash.com/photo-1585747860715-2ba37e788b70?auto=format&fit=crop&w=400&q=80`,
+          alt: title,
+        },
+      ],
     });
   } catch (err) {
     console.error('Error fetching storefront product:', err);
@@ -177,59 +204,89 @@ export const createStorefrontOrder = async (req, res) => {
       return res.status(404).json({ message: 'Store not found' });
     }
 
-    const {
-      customer,
-      items = [],
-      shippingFee = 200,
-      discount = 0,
-      paymentMethod = 'cod',
-      customerNotes = '',
-    } = req.body;
+    // Support both Etimad Suite schema and legacy etimadmart.com checkout schema
+    const rawCustomer = req.body.customer || req.body.shippingAddress || {};
+    const customer = {
+      name: (rawCustomer.name || rawCustomer.fullName || '').trim(),
+      phone: (rawCustomer.phone || rawCustomer.mobile || '').trim(),
+      address: (rawCustomer.address || rawCustomer.streetAddress || '').trim(),
+      city: (rawCustomer.city || '').trim(),
+      province: (rawCustomer.province || 'Punjab').trim(),
+      postalCode: (rawCustomer.postalCode || '').trim(),
+      email: (rawCustomer.email || '').trim(),
+    };
 
-    if (!customer || !customer.name || !customer.phone || !customer.address || !customer.city) {
+    const rawItems = req.body.items || req.body.cartSummary || [];
+    const shippingFee = req.body.shippingFee != null ? Number(req.body.shippingFee) : Number(req.body.deliveryCharges ?? 200);
+    const discount = req.body.discount != null ? Number(req.body.discount) : Number(req.body.discountAmount ?? 0);
+    const paymentMethod = req.body.paymentMethod || 'cod';
+    const customerNotes = (req.body.customerNotes || req.body.additionalInstructions || '').trim();
+
+    if (!customer.name || !customer.phone || !customer.address || !customer.city) {
       return res.status(400).json({
+        success: false,
         message: 'Customer name, phone, address, and city are required for shipping',
       });
     }
 
-    if (!items || items.length === 0) {
-      return res.status(400).json({ message: 'Order must include at least one item' });
+    if (!rawItems || rawItems.length === 0) {
+      return res.status(400).json({ success: false, message: 'Order must include at least one item' });
     }
 
     // Validate inventory and prepare items
     const orderItems = [];
     let subtotal = 0;
 
-    for (const item of items) {
-      const qty = Number(item.quantity || 1);
+    for (const raw of rawItems) {
+      const qty = Number(raw.quantity || raw.count || 1);
       if (qty <= 0) continue;
 
-      const product = await Product.findOne({
-        _id: item.productId,
-        tenantId: tenant._id,
-      });
+      let product = null;
+      const prodId = raw.productId || raw._id || raw.product?._id;
+      if (prodId && mongoose.Types.ObjectId.isValid(prodId)) {
+        product = await Product.findOne({ _id: prodId, tenantId: tenant._id });
+      }
 
-      if (!product) {
-        return res.status(400).json({
-          message: `Product ${item.name || item.productId} was not found`,
+      if (!product && raw.model) {
+        product = await Product.findOne({
+          model: new RegExp(`^${raw.model.trim()}$`, 'i'),
+          tenantId: tenant._id,
         });
       }
 
-      if (Number(product.stock || 0) < qty) {
-        return res.status(400).json({
-          message: `Insufficient warehouse stock for ${product.name} (${product.model}). Available: ${product.stock}, requested: ${qty}`,
+      const searchTitle = raw.title || raw.name || '';
+      if (!product && searchTitle) {
+        const words = searchTitle.split(/\s+/);
+        for (const word of words) {
+          if (word.length >= 3 && !['THE', 'FOR', 'AND', 'WITH', 'HAIR', 'BEST', 'PRO'].includes(word.toUpperCase())) {
+            product = await Product.findOne({
+              tenantId: tenant._id,
+              model: new RegExp(word, 'i'),
+            });
+            if (product) break;
+          }
+        }
+      }
+
+      if (!product && searchTitle) {
+        product = await Product.findOne({
+          tenantId: tenant._id,
+          name: new RegExp(searchTitle.slice(0, 8), 'i'),
         });
       }
 
-      const unitPrice = Number(item.unitPrice || product.websitePrice || product.retailPrice || 0);
+      const itemName = product ? product.name : (raw.title || raw.name || 'Online Item');
+      const itemModel = product ? product.model : (raw.model || '');
+      const itemCategory = product ? product.category : 'General';
+      const unitPrice = Number(raw.unitPrice || raw.price || (product ? (product.websitePrice || product.retailPrice) : 0));
       const lineTotal = unitPrice * qty;
 
       subtotal += lineTotal;
       orderItems.push({
-        productId: product._id,
-        name: product.name,
-        model: product.model || '',
-        category: product.category || 'General',
+        productId: product ? product._id : (mongoose.Types.ObjectId.isValid(prodId) ? prodId : new mongoose.Types.ObjectId()),
+        name: itemName,
+        model: itemModel,
+        category: itemCategory,
         quantity: qty,
         unitPrice,
         totalAmount: lineTotal,
@@ -316,6 +373,12 @@ export const createStorefrontOrder = async (req, res) => {
 
     res.status(201).json({
       success: true,
+      order: {
+        _id: order._id,
+        orderNumber: order.orderNumber,
+        total: order.total,
+        status: order.status,
+      },
       orderNumber: order.orderNumber,
       orderId: order._id,
       total: order.total,
