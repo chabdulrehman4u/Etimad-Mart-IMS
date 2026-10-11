@@ -27,6 +27,7 @@ const LCS = lazy(() => import('./pages/LCS'));
 const SellerDashboard = lazy(() => import('./pages/SellerDashboard'));
 const SellerPasswordChange = lazy(() => import('./pages/SellerPasswordChange'));
 const AdminManagement = lazy(() => import('./pages/AdminManagement'));
+const BusinessSettings = lazy(() => import('./pages/BusinessSettings'));
 const FinanceDashboard = lazy(() => import('./pages/finance/FinanceDashboard'));
 
 const App = () => {
@@ -59,6 +60,7 @@ const App = () => {
                 }
               >
                 <Route index element={<Dashboard />} />
+                <Route path="business-settings" element={<BusinessSettings />} />
                 <Route path="admin-management" element={<AdminManagement />} />
                 <Route path="products" element={<Products />} />
                 <Route path="sellers" element={<SellerWorkspace />} />

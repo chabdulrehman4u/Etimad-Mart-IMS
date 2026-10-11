@@ -31,6 +31,7 @@ import { runLcsAutoSync } from './controllers/lcsParcelController.js';
 import purchaseBatchRoutes from './routes/purchase-batches.js';
 import financeRoutes from './routes/finance.js';
 import sellerDispatchRoutes from './routes/seller-dispatch.js';
+import tenantRoutes from './routes/tenant.js';
 
 // Import middleware
 import { authenticate } from './middleware/auth.js';
@@ -112,6 +113,7 @@ app.use('/api/lcs-parcels', authenticate, lcsParcelRoutes);
 app.use('/api/purchase-batches', authenticate, purchaseBatchRoutes);
 app.use('/api/finance', authenticate, financeRoutes);
 app.use('/api/seller-dispatch', authenticate, sellerDispatchRoutes);
+app.use('/api/tenant', tenantRoutes);
 
 // Serve frontend static files from Vite dist folder
 const frontendDistPath = path.join(__dirname, '../frontend/dist');

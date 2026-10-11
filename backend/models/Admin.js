@@ -26,6 +26,15 @@ const adminSchema = new mongoose.Schema({
     enum: ['admin', 'superadmin', 'manager'],
     default: 'admin'
   },
+  tenantId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Tenant',
+    index: true
+  },
+  isSuperAdmin: {
+    type: Boolean,
+    default: false
+  },
   resetPasswordToken: {
     type: String
   },

@@ -64,3 +64,17 @@ export const authorizeSeller = (req, res, next) => {
   }
   next();
 };
+
+// Restrict to superadmin platform administrators
+export const authorizeSuperAdmin = (req, res, next) => {
+  if (req.userType !== 'admin') {
+    return res.status(403).json({ message: 'Access denied. Superadmin privileges required.' });
+  }
+
+  if (req.admin.role !== 'superadmin' && !req.admin.isSuperAdmin) {
+    return res.status(403).json({ message: 'Access denied. Superadmin privileges required.' });
+  }
+
+  next();
+};
+

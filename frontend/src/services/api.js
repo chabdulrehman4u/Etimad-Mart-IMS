@@ -204,4 +204,11 @@ export const getDashboardAlerts = getSellerDashboardAlerts;
 export const getBanks = getFinanceBanks;
 export const getPettyCash = getFinancePettyCash;
 
+// Etimad Suite — Multi-Tenant & Business Settings
+export const getCurrentTenant = () => api.get('/tenant/current');
+export const updateCurrentTenant = (data) => api.put('/tenant/current', data);
+export const getTenantPublicProfile = (slug) => api.get(`/tenant/public/${encodeURIComponent(slug)}`);
+export const getAllTenants = () => api.get('/tenant/all');
+export const createTenant = (data) => api.post('/tenant', data);
+
 export default api;

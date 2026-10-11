@@ -21,6 +21,7 @@ import {
   PawPrint,
   Boxes,
   Landmark,
+  Building2,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useNotifications } from '../context/NotificationContext';
@@ -43,6 +44,7 @@ const Layout = () => {
 
   const allNavItems = [
     { path: '/', icon: LayoutDashboard, label: 'Dashboard', roles: ['admin', 'superadmin'] },
+    { path: '/business-settings', icon: Building2, label: 'Store Settings', roles: ['admin', 'superadmin'] },
     { path: '/admin-management', icon: Shield, label: 'Admins', roles: ['admin', 'superadmin'] },
     { path: '/products', icon: Package, label: 'Products', roles: ['admin', 'superadmin', 'manager'] },
     { path: '/purchase-batches', icon: Boxes, label: 'Purchase Batches', roles: ['admin', 'superadmin', 'manager'] },
