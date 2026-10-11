@@ -65,6 +65,65 @@ const productSchema = new mongoose.Schema({
     type: Boolean,
     default: true
   },
+  // Rich E-Commerce Fields
+  title: {
+    type: String,
+    trim: true,
+  },
+  slug: {
+    type: String,
+    trim: true,
+    index: true,
+  },
+  description: {
+    type: String,
+    default: '',
+  },
+  longDescription: {
+    type: String,
+    default: '',
+  },
+  metaDescription: {
+    type: String,
+    default: '',
+  },
+  images: [
+    {
+      url: { type: String, required: true },
+      public_id: { type: String, default: '' },
+      alt: { type: String, default: '' },
+    },
+  ],
+  brand: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Brand',
+  },
+  subCategory: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'SubCategory',
+  },
+  categories: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Category',
+    },
+  ],
+  freeShipping: {
+    type: Boolean,
+    default: false,
+  },
+  deliveryCharges: {
+    type: Number,
+    default: 0,
+  },
+  sold: {
+    type: Number,
+    default: 0,
+  },
+  averageRating: {
+    type: Number,
+    default: 0,
+  },
   tenantId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Tenant',
