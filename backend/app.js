@@ -34,6 +34,7 @@ import sellerDispatchRoutes from './routes/seller-dispatch.js';
 import tenantRoutes from './routes/tenant.js';
 import storefrontRoutes from './routes/storefront.js';
 import onlineOrderRoutes from './routes/online-orders.js';
+import cmsRoutes from './routes/cms.js';
 
 // Import middleware
 import { authenticate } from './middleware/auth.js';
@@ -95,6 +96,8 @@ if (process.env.NODE_ENV !== 'production') {
 // Public routes
 app.use('/api/auth', authRoutes);
 app.use('/api/storefront', cors(), storefrontRoutes);
+app.use('/api', cmsRoutes);
+app.use('/api/cms', cmsRoutes);
 
 // Protected routes (require authentication)
 app.use('/api/categories', authenticate, categoryRoutes);
