@@ -483,8 +483,12 @@ export const updateFooter = async (req, res) => {
 export const getBrands = async (req, res) => {
   try {
     const tenantId = await getTenantId(req);
-    const brands = await Brand.find({ tenantId }).sort({ name: 1 });
-    res.json(brands);
+    const brands = await Brand.find({ ...(tenantId ? { tenantId } : {}) }).sort({ name: 1 });
+    res.json({
+      success: true,
+      brands,
+      data: brands,
+    });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -542,7 +546,11 @@ export const getPublicCategories = async (req, res) => {
   try {
     const tenantId = await getTenantId(req);
     const categories = await Category.find({ ...(tenantId ? { tenantId } : {}) }).sort({ name: 1 });
-    res.json(categories);
+    res.json({
+      success: true,
+      categories,
+      data: categories,
+    });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

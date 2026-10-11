@@ -27,7 +27,8 @@ const BrandsReviewsCMS = () => {
     try {
       setLoading(true);
       const res = await axios.get(`${API_BASE}/brand/all`);
-      setBrands(Array.isArray(res.data) ? res.data : []);
+      const list = Array.isArray(res.data) ? res.data : (res.data?.brands || []);
+      setBrands(list);
     } catch (err) {
       console.error('Error fetching brands:', err);
     } finally {

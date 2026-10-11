@@ -42,6 +42,17 @@ import {
   getAllReviewsAdmin,
   deleteReview,
 } from '../controllers/cmsController.js';
+import {
+  getStorefrontCatalog,
+  getStorefrontProduct,
+  createStorefrontOrder,
+  trackStorefrontOrder,
+  getStorefrontHomepageData,
+  getRelatedStorefrontProducts,
+  getStorefrontProductsBySub,
+  getStorefrontMinMaxPrice,
+  searchStorefrontProducts,
+} from '../controllers/storefrontController.js';
 import { authenticate } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -98,6 +109,7 @@ router.put('/footer', authenticate, updateFooter);
 
 // ===== BRANDS =====
 router.get('/brand/all', getBrands);
+router.get('/brand/get-all', getBrands);
 router.post('/brand/add', authenticate, createBrand);
 router.delete('/brand/:id', authenticate, deleteBrand);
 
@@ -107,6 +119,20 @@ router.delete('/review/admin/:id', authenticate, deleteReview);
 router.get('/review/:slug', getProductReviews);
 router.post('/review/create/:productSlug/:reviewerId', createProductReview);
 router.post('/review/create', createProductReview);
+
+// ===== STOREFRONT COMPATIBILITY (EtimadMart.com) =====
+router.get('/homepage-data', getStorefrontHomepageData);
+router.get('/product/getAll', getStorefrontCatalog);
+router.get('/product/catalog', getStorefrontCatalog);
+router.get('/product/related/:categoryId/:excludeProductId', getRelatedStorefrontProducts);
+router.get('/product/sub/:subCategory', getStorefrontProductsBySub);
+router.get('/product/:idOrModel', getStorefrontProduct);
+router.get('/search/filter/min-max-price', getStorefrontMinMaxPrice);
+router.get('/search/filter/combined', searchStorefrontProducts);
+router.get('/search', searchStorefrontProducts);
+router.post('/order/create', createStorefrontOrder);
+router.get('/order/track/:identifier', trackStorefrontOrder);
+router.get('/track/:identifier', trackStorefrontOrder);
 
 export default router;
 

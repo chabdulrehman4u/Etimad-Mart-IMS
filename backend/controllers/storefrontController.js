@@ -141,6 +141,9 @@ export const getStorefrontCatalog = async (req, res) => {
         currencySymbol: tenant.currencySymbol || 'Rs.',
       },
       products: formatted,
+      totalPages: Math.ceil(totalCount / Number(limit)) || 1,
+      currentPage: Number(page),
+      totalProducts: totalCount,
       pagination: {
         total: totalCount,
         page: Number(page),
@@ -156,18 +159,20 @@ export const getStorefrontCatalog = async (req, res) => {
 // 3. Get Single Product
 export const getStorefrontProduct = async (req, res) => {
   try {
-    const { slug, idOrModel } = req.params;
-    const tenant = await resolveTenantBySlug(slug);
+    const { slug, idOrModel, identifier } = req.params;
+    const targetProduct = idOrModel || identifier || (slug && !idOrModel ? slug : null);
+    const tenantSlug = (idOrModel || identifier) ? slug : undefined;
+    const tenant = await resolveTenantBySlug(tenantSlug);
 
     if (!tenant) {
       return res.status(404).json({ message: 'Store not found' });
     }
 
     const query = { tenantId: tenant._id, isOnlineAvailable: { $ne: false } };
-    if (idOrModel.match(/^[0-9a-fA-F]{24}$/)) {
-      query._id = idOrModel;
-    } else {
-      query.$or = [{ slug: idOrModel }, { model: idOrModel }, { barcode: idOrModel }];
+    if (targetProduct && targetProduct.match(/^[0-9a-fA-F]{24}$/)) {
+      query._id = targetProduct;
+    } else if (targetProduct) {
+      query.$or = [{ slug: targetProduct }, { model: targetProduct }, { barcode: targetProduct }];
     }
 
     const product = await Product.findOne(query);
@@ -190,9 +195,9 @@ export const getStorefrontProduct = async (req, res) => {
           },
         ];
 
-    res.json({
-      success: true,
+    const productPayload = {
       _id: product._id,
+      id: product._id,
       name: product.name,
       title,
       model: product.model,
@@ -213,10 +218,214 @@ export const getStorefrontProduct = async (req, res) => {
       sold: product.sold || 0,
       averageRating: product.averageRating || 5,
       images: productImages,
+      variants: product.variants || [],
+    };
+
+    res.json({
+      success: true,
+      product: productPayload,
+      ...productPayload,
     });
   } catch (err) {
     console.error('Error fetching storefront product:', err);
     res.status(500).json({ message: 'Failed to load product' });
+  }
+};
+
+// 3a. Related Products
+export const getRelatedStorefrontProducts = async (req, res) => {
+  try {
+    const { categoryId, excludeProductId } = req.params;
+    const tenant = await resolveTenantBySlug();
+    const query = {
+      tenantId: tenant._id,
+      isOnlineAvailable: { $ne: false },
+      category: categoryId,
+    };
+    if (mongoose.Types.ObjectId.isValid(excludeProductId)) {
+      query._id = { $ne: excludeProductId };
+    }
+    const products = await Product.find(query).limit(8).lean();
+    res.json({ success: true, products });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to load related products' });
+  }
+};
+
+// 3b. Products by Subcategory
+export const getStorefrontProductsBySub = async (req, res) => {
+  try {
+    const { subCategory } = req.params;
+    const { page = 1, limit = 16 } = req.query;
+    const tenant = await resolveTenantBySlug();
+    const query = {
+      tenantId: tenant._id,
+      isOnlineAvailable: { $ne: false },
+      subCategory: new RegExp(`^${subCategory}$`, 'i'),
+    };
+    const skip = (Number(page) - 1) * Number(limit);
+    const [products, total] = await Promise.all([
+      Product.find(query).skip(skip).limit(Number(limit)).lean(),
+      Product.countDocuments(query),
+    ]);
+    res.json({
+      success: true,
+      products,
+      totalPages: Math.ceil(total / Number(limit)) || 1,
+      currentPage: Number(page),
+    });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to load products' });
+  }
+};
+
+// 3c. Min-Max Price
+export const getStorefrontMinMaxPrice = async (req, res) => {
+  try {
+    const tenant = await resolveTenantBySlug();
+    const minMax = await Product.aggregate([
+      { $match: { tenantId: tenant._id, isOnlineAvailable: { $ne: false } } },
+      {
+        $group: {
+          _id: null,
+          minPrice: { $min: { $ifNull: ['$websitePrice', '$retailPrice'] } },
+          maxPrice: { $max: { $ifNull: ['$websitePrice', '$retailPrice'] } },
+        },
+      },
+    ]);
+    res.json({
+      success: true,
+      minPrice: minMax[0]?.minPrice || 0,
+      maxPrice: minMax[0]?.maxPrice || 10000,
+    });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to calculate price range' });
+  }
+};
+
+// 3d. Search & Filter Combined
+export const searchStorefrontProducts = async (req, res) => {
+  try {
+    const tenant = await resolveTenantBySlug();
+    const {
+      page = 1,
+      limit = 16,
+      categories,
+      categoryName,
+      subcategory,
+      subcategoryName,
+      brand,
+      rating,
+      minPrice,
+      maxPrice,
+      sort,
+      keyword,
+      query: qParam,
+    } = req.query;
+
+    const query = { tenantId: tenant._id, isOnlineAvailable: { $ne: false } };
+
+    const searchKeyword = keyword || qParam;
+    if (searchKeyword) {
+      const term = String(searchKeyword).trim();
+      query.$or = [
+        { name: { $regex: term, $options: 'i' } },
+        { model: { $regex: term, $options: 'i' } },
+        { category: { $regex: term, $options: 'i' } },
+      ];
+    }
+
+    const catParam = categories || categoryName;
+    if (catParam) {
+      const catList = Array.isArray(catParam) ? catParam : [catParam];
+      query.category = { $in: catList.map((c) => new RegExp(`^${c}$`, 'i')) };
+    }
+
+    const subParam = subcategory || subcategoryName;
+    if (subParam) {
+      const SubCategoryModel = (await import('../models/SubCategory.js')).default;
+      const foundSub = await SubCategoryModel.findOne({
+        $or: [{ name: new RegExp(`^${subParam}$`, 'i') }, { slug: new RegExp(`^${subParam}$`, 'i') }],
+      });
+      if (foundSub) {
+        query.subCategory = foundSub._id;
+      }
+    }
+
+    if (brand) {
+      const BrandModel = (await import('../models/Brand.js')).default;
+      const foundBrand = await BrandModel.findOne({
+        $or: [{ name: new RegExp(`^${brand}$`, 'i') }, { slug: new RegExp(`^${brand}$`, 'i') }],
+      });
+      if (foundBrand) {
+        query.brand = foundBrand._id;
+      }
+    }
+
+    if (rating) {
+      const r = Number(rating);
+      if (!isNaN(r)) query.averageRating = { $gte: r };
+    }
+
+    const pMin = minPrice != null && minPrice !== '' ? Number(minPrice) : null;
+    const pMax = maxPrice != null && maxPrice !== '' ? Number(maxPrice) : null;
+    if (pMin !== null || pMax !== null) {
+      query.websitePrice = {};
+      if (pMin !== null && !isNaN(pMin)) query.websitePrice.$gte = pMin;
+      if (pMax !== null && !isNaN(pMax)) query.websitePrice.$lte = pMax;
+    }
+
+    const sortMap = {
+      price_asc: { websitePrice: 1, retailPrice: 1 },
+      price_desc: { websitePrice: -1, retailPrice: -1 },
+      asc: { websitePrice: 1 },
+      desc: { websitePrice: -1 },
+      newest: { createdAt: -1 },
+    };
+    const sortObj = sortMap[sort] || { createdAt: -1 };
+
+    const skip = (Number(page) - 1) * Number(limit);
+    const [products, totalCount] = await Promise.all([
+      Product.find(query).sort(sortObj).skip(skip).limit(Number(limit)).lean(),
+      Product.countDocuments(query),
+    ]);
+
+    const formatted = products.map((p) => {
+      const price = Number(p.websitePrice || p.retailPrice || 0);
+      const title = p.model ? `${p.name} ${p.model}` : p.name;
+      const pSlug = p.slug || (p.model ? `${p.name}-${p.model}` : p.name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+      const pImages = p.images && p.images.length > 0 ? p.images : [{ url: 'https://images.unsplash.com/photo-1585747860715-2ba37e788b70?auto=format&fit=crop&w=400&q=80', alt: title }];
+      return {
+        _id: p._id,
+        id: p._id,
+        name: p.name,
+        title,
+        model: p.model,
+        slug: pSlug,
+        category: p.category,
+        brand: p.brand || '',
+        price: Math.round(price * 1.15),
+        salePrice: price,
+        websitePrice: Number(p.websitePrice || 0),
+        retailPrice: Number(p.retailPrice || 0),
+        inStock: Number(p.stock || 0) > 0,
+        stock: Number(p.stock || 0),
+        images: pImages,
+        averageRating: p.averageRating || 5,
+        sold: p.sold || 0,
+      };
+    });
+
+    res.json({
+      success: true,
+      products: formatted,
+      totalProducts: totalCount,
+      totalPages: Math.ceil(totalCount / Number(limit)) || 1,
+      currentPage: Number(page),
+    });
+  } catch (err) {
+    console.error('Search storefront products error:', err);
+    res.status(500).json({ message: 'Search failed', error: err.message });
   }
 };
 
