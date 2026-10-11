@@ -166,7 +166,16 @@ const BillReceipt = ({ bill, onClose, onPrint, onPaymentUpdated }) => {
 
               {/* Bill Details Card - simple form style */}
               <div className="bg-gray-50  p-4  text-xs">
-                <h3 className="text-sm font-semibold text-gray-900 text-center mb-3 border-b border-gray-200 pb-2">Invoice Details</h3>
+                <div className="flex items-center justify-between mb-3 border-b border-gray-200 pb-2">
+                  <h3 className="text-sm font-semibold text-gray-900">Invoice Details</h3>
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                    bill.channel === 'wholesale'
+                      ? 'bg-blue-100 text-blue-800 border border-blue-200'
+                      : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                  }`}>
+                    {bill.channel === 'wholesale' ? 'Wholesale B2B' : 'Retail POS'}
+                  </span>
+                </div>
 
                 <div className="space-y-1.5">
                   <div className="flex justify-between gap-2">
@@ -177,6 +186,18 @@ const BillReceipt = ({ bill, onClose, onPrint, onPaymentUpdated }) => {
                     <span className="text-gray-600 whitespace-nowrap">Date &amp; Time:</span>
                     <span className="font-medium text-gray-800 flex-1 text-right">{formatDate(bill.createdAt)}</span>
                   </div>
+                  {bill.dueDate && (
+                    <div className="flex justify-between gap-2 text-rose-700 font-semibold">
+                      <span className="whitespace-nowrap">Payment Due:</span>
+                      <span className="flex-1 text-right">{new Date(bill.dueDate).toLocaleDateString('en-PK')}</span>
+                    </div>
+                  )}
+                  {bill.deliveryChallanNumber && (
+                    <div className="flex justify-between gap-2 text-blue-700">
+                      <span className="whitespace-nowrap">Delivery Challan:</span>
+                      <span className="font-mono flex-1 text-right">{bill.deliveryChallanNumber}</span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -274,14 +295,28 @@ const BillReceipt = ({ bill, onClose, onPrint, onPaymentUpdated }) => {
                   <span className="text-gray-800">Total:</span>
                   <span className="text-gray-900">Rs.{formatCurrency(bill.total)}</span>
                 </div>
-                <div className="flex items-center mt-1">
-                  <span className="text-gray-700 mr-2">Amount Paid</span>
-                  <span className="flex-1 border-b border-dashed border-gray-400 h-4 invoice-dotted-line" />
+                {Number(bill.cashReceived || 0) > 0 && (
+                  <div className="flex justify-between items-center text-xs text-gray-700">
+                    <span>Cash Tendered:</span>
+                    <span>Rs.{formatCurrency(bill.cashReceived)}</span>
+                  </div>
+                )}
+                {Number(bill.changeReturned || 0) > 0 && (
+                  <div className="flex justify-between items-center text-xs font-semibold text-emerald-700">
+                    <span>Change Returned:</span>
+                    <span>Rs.{formatCurrency(bill.changeReturned)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between items-center mt-1">
+                  <span className="text-gray-700">Amount Paid:</span>
+                  <span className="font-semibold text-gray-900">Rs.{formatCurrency(alreadyPaid)}</span>
                 </div>
-                <div className="flex items-center mt-1">
-                  <span className="text-gray-700 mr-2">Remaining</span>
-                  <span className="flex-1 border-b border-dashed border-gray-400 h-4 invoice-dotted-line" />
-                </div>
+                {remainingBefore > 0 && (
+                  <div className="flex justify-between items-center mt-1 text-rose-700 font-bold">
+                    <span>Remaining Balance:</span>
+                    <span>Rs.{formatCurrency(remainingBefore)}</span>
+                  </div>
+                )}
               </div>
             </div>
           </div>

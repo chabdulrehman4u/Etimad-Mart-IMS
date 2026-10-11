@@ -47,6 +47,28 @@ const productSchema = new mongoose.Schema({
     required: true,
     min: 0,
     default: 0
+  },
+  minWholesaleQty: {
+    type: Number,
+    default: 6,
+    min: 1
+  },
+  isRetailAvailable: {
+    type: Boolean,
+    default: true
+  },
+  isWholesaleAvailable: {
+    type: Boolean,
+    default: true
+  },
+  isOnlineAvailable: {
+    type: Boolean,
+    default: true
+  },
+  tenantId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Tenant',
+    index: true
   }
 }, {
   timestamps: true

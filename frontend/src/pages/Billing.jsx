@@ -1,14 +1,23 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
+  ArrowRight,
+  Building2,
   Calculator,
+  Calendar,
+  CheckCircle2,
+  DollarSign,
   History,
   Minus,
   Package,
   Plus,
   Receipt,
+  ScanLine,
   ShoppingCart,
+  Sparkles,
+  Store,
   Trash2,
+  Truck,
   User,
   X
 } from 'lucide-react';
@@ -19,12 +28,17 @@ import BillReceipt from '../components/BillReceipt';
 import Button from '../components/Button';
 import Card, { CardBody, CardHeader, CardTitle } from '../components/Card';
 import Modal from '../components/Modal';
+import ScanInput from '../components/ScanInput';
 import SearchBar from '../components/SearchBar';
 import { useToast } from '../context/ToastContext';
 import { createBill, createCustomer, getCustomerHistory, getCustomerLastProductPrice, getCustomers, getProducts, getSellers } from '../services/api';
 
 const Billing = () => {
   const [billItems, setBillItems] = useState([]);
+  const [billingChannel, setBillingChannel] = useState('retail'); // 'retail' or 'wholesale'
+  const [cashReceived, setCashReceived] = useState('');
+  const [wholesaleDueDate, setWholesaleDueDate] = useState('');
+  const [deliveryChallanNumber, setDeliveryChallanNumber] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [selectedSeller, setSelectedSeller] = useState(null);
   const [selectedProductId, setSelectedProductId] = useState('');
@@ -305,27 +319,134 @@ const Billing = () => {
     }
   }, [location.state]);
 
-  // Add product to bill via manual form (product + quantity + unit price)
+  // Auto-select first seller if none selected
+  useEffect(() => {
+    if (!selectedSeller && sellers && sellers.length > 0) {
+      setSelectedSeller(sellers[0]);
+    }
+  }, [sellers, selectedSeller]);
+
+  // Handle switching between Retail POS and Wholesale B2B channels
+  const handleChannelChange = (newChannel) => {
+    setBillingChannel(newChannel);
+    // Recalculate cart item prices according to selected channel
+    setBillItems((prevItems) =>
+      prevItems.map((item) => {
+        const minQty = item.minWholesaleQty || 6;
+        if (newChannel === 'wholesale') {
+          return {
+            ...item,
+            selectedPrice: item.wholesalePrice || item.selectedPrice,
+            selectedPriceType: 'wholesalePrice',
+          };
+        } else {
+          // Retail channel: apply wholesale price only if qty meets minWholesaleQty
+          const isTier = item.quantity >= minQty;
+          return {
+            ...item,
+            selectedPrice: isTier ? (item.wholesalePrice || item.retailPrice) : (item.retailPrice || item.selectedPrice),
+            selectedPriceType: isTier ? 'wholesalePrice' : 'retailPrice',
+          };
+        }
+      })
+    );
+    toast.info(`Switched to ${newChannel === 'wholesale' ? 'Wholesale B2B Billing' : 'Retail POS Counter'}`);
+  };
+
+  // Instant barcode scanner handler (supports hardware scanner gun and manual Enter)
+  const handleBarcodeScan = (scannedCode) => {
+    const raw = String(scannedCode || '').trim();
+    if (!raw) return;
+
+    const query = raw.toLowerCase();
+    const product = products.find(
+      (p) =>
+        (p.barcode && p.barcode.trim().toLowerCase() === query) ||
+        (p.model && p.model.trim().toLowerCase() === query) ||
+        (p._id && p._id.toLowerCase() === query) ||
+        (p.name && p.name.trim().toLowerCase() === query)
+    );
+
+    if (!product) {
+      toast.error(`No product found for barcode / model: "${raw}"`);
+      return;
+    }
+
+    if (billingChannel === 'retail' && product.isRetailAvailable === false) {
+      toast.error(`${product.name} is not enabled for Retail POS`);
+      return;
+    }
+    if (billingChannel === 'wholesale' && product.isWholesaleAvailable === false) {
+      toast.error(`${product.name} is not enabled for Wholesale B2B`);
+      return;
+    }
+
+    const minQty = product.minWholesaleQty || 6;
+    const existingIndex = billItems.findIndex((item) => item.productId === product._id);
+
+    if (existingIndex >= 0) {
+      const existing = billItems[existingIndex];
+      const newQty = existing.quantity + 1;
+      updateQuantity(product._id, newQty);
+      toast.success(`+1 ${product.name} (Total Qty: ${newQty})`);
+    } else {
+      const isWholesale = billingChannel === 'wholesale';
+      const initialPrice = isWholesale
+        ? Number(product.wholesalePrice || product.retailPrice || 0)
+        : Number(product.retailPrice || 0);
+
+      const newItem = {
+        productId: product._id,
+        name: product.name || 'Unknown Product',
+        model: product.model || 'N/A',
+        category: product.category || 'Uncategorized',
+        selectedPriceType: isWholesale ? 'wholesalePrice' : 'retailPrice',
+        selectedPrice: initialPrice,
+        wholesalePrice: Number(product.wholesalePrice || 0),
+        retailPrice: Number(product.retailPrice || 0),
+        minWholesaleQty: minQty,
+        originalPrice: Number(product.originalPrice) || 0,
+        quantity: 1,
+        stock: Number(product.stock) || 0,
+      };
+
+      setBillItems((prev) => [...prev, newItem]);
+      toast.success(`Added ${product.name} (${product.model})`);
+    }
+  };
+
+  // Add product to bill via manual form
   const addProductToBill = () => {
     const product = products.find((p) => p._id === selectedProductId);
     if (!product) {
-      alert('Please select a product');
+      toast.error('Please select a product');
       return;
     }
     const qty = Number(lineQuantity || 0);
     const unitPrice = Number(lineUnitPrice || 0);
     if (qty <= 0 || unitPrice < 0) {
-      alert('Please enter a valid quantity and unit price');
+      toast.error('Please enter a valid quantity and unit price');
       return;
     }
 
+    const minQty = product.minWholesaleQty || 6;
+    const isWholesale = billingChannel === 'wholesale' || qty >= minQty;
     const existingItem = billItems.find((item) => item.productId === product._id);
 
     if (existingItem) {
+      const newQty = existingItem.quantity + qty;
+      let newPrice = unitPrice;
+      let newPriceType = existingItem.selectedPriceType;
+
+      if (billingChannel === 'wholesale' || newQty >= minQty) {
+        newPrice = product.wholesalePrice || unitPrice;
+        newPriceType = 'wholesalePrice';
+      }
+
       setBillItems(
         billItems.map((item) =>
           item.productId === product._id
-            ? { ...item, quantity: item.quantity + qty, selectedPrice: unitPrice }
+            ? { ...item, quantity: newQty, selectedPrice: newPrice, selectedPriceType: newPriceType }
             : item
         )
       );
@@ -335,11 +456,14 @@ const Billing = () => {
         name: product.name || 'Unknown Product',
         model: product.model || 'N/A',
         category: product.category || 'Uncategorized',
-        selectedPriceType: 'retailPrice',
+        selectedPriceType: isWholesale ? 'wholesalePrice' : 'retailPrice',
         selectedPrice: unitPrice,
+        wholesalePrice: Number(product.wholesalePrice || 0),
+        retailPrice: Number(product.retailPrice || 0),
+        minWholesaleQty: minQty,
         originalPrice: Number(product.originalPrice) || 0,
         quantity: qty,
-        stock: Number(product.stock) || 0
+        stock: Number(product.stock) || 0,
       };
 
       setBillItems([...billItems, newItem]);
@@ -349,51 +473,110 @@ const Billing = () => {
     setSelectedProductId('');
     setLineQuantity(1);
     setLineUnitPrice('');
+    setProductSearch('');
   };
 
-  // Update item quantity
+  // Update item quantity with wholesale tier auto-pricing
   const updateQuantity = (productId, newQuantity) => {
     if (newQuantity <= 0) {
       removeItem(productId);
       return;
     }
 
-    setBillItems(billItems.map(item =>
-      item.productId === productId
-        ? { ...item, quantity: newQuantity }
-        : item
-    ));
+    setBillItems(
+      billItems.map((item) => {
+        if (item.productId !== productId) return item;
+
+        let newPrice = item.selectedPrice;
+        let newPriceType = item.selectedPriceType;
+        const minQty = item.minWholesaleQty || 6;
+
+        if (billingChannel === 'wholesale') {
+          newPrice = item.wholesalePrice || item.selectedPrice;
+          newPriceType = 'wholesalePrice';
+        } else {
+          // Retail channel auto-tiering
+          if (newQuantity >= minQty && item.wholesalePrice) {
+            if (item.selectedPrice === item.retailPrice || item.selectedPriceType === 'retailPrice') {
+              newPrice = item.wholesalePrice;
+              newPriceType = 'wholesalePrice';
+              toast.info(`Wholesale rate auto-applied for ${item.name} (≥${minQty} pcs)`);
+            }
+          } else if (newQuantity < minQty && item.retailPrice) {
+            if (item.selectedPrice === item.wholesalePrice || item.selectedPriceType === 'wholesalePrice') {
+              newPrice = item.retailPrice;
+              newPriceType = 'retailPrice';
+            }
+          }
+        }
+
+        return {
+          ...item,
+          quantity: newQuantity,
+          selectedPrice: newPrice,
+          selectedPriceType: newPriceType,
+        };
+      })
+    );
   };
 
-  // Update item price type
-  const updateItemPrice = (productId, newPrice) => {
+  // Update item price manually
+  const updateItemPrice = (productId, newPrice, priceType) => {
     const price = Number(newPrice || 0);
     setBillItems(
       billItems.map((item) =>
-        item.productId === productId ? { ...item, selectedPrice: price } : item
+        item.productId === productId
+          ? { ...item, selectedPrice: price, ...(priceType ? { selectedPriceType: priceType } : {}) }
+          : item
       )
     );
   };
 
   // Remove item from bill
   const removeItem = (productId) => {
-    setBillItems(billItems.filter(item => item.productId !== productId));
+    setBillItems(billItems.filter((item) => item.productId !== productId));
   };
 
-  // Calculate totals with proper number conversion
+  // Calculate totals
   const subtotal = billItems.reduce((sum, item) => {
     const price = Number(item.selectedPrice || 0);
     const quantity = Number(item.quantity || 0);
-    return sum + (price * quantity);
+    return sum + price * quantity;
   }, 0);
 
-  // No discount applied in totals (per latest requirement)
   const discountAmount = 0;
   const total = Math.max(0, subtotal);
 
   // Amount paid and remaining balance
   const numericAmountPaid = Number(amountPaid || 0);
   const remainingAmount = Math.max(0, total - numericAmountPaid);
+
+  // Cashier quick cash calculator handlers
+  const handleQuickCash = (amount) => {
+    setCashReceived(amount);
+    if (amount >= total) {
+      setAmountPaid(total);
+      setIsFullyPaid(true);
+    } else {
+      setAmountPaid(amount);
+      setIsFullyPaid(false);
+    }
+  };
+
+  const handleCashReceivedChange = (value) => {
+    setCashReceived(value);
+    const num = parseFloat(value) || 0;
+    if (num >= total && total > 0) {
+      setAmountPaid(total);
+      setIsFullyPaid(true);
+    } else if (num > 0) {
+      setAmountPaid(Math.min(num, total));
+      setIsFullyPaid(false);
+    } else {
+      setAmountPaid(0);
+      setIsFullyPaid(false);
+    }
+  };
 
   // Keep amountPaid in sync when bill is marked as fully paid
   useEffect(() => {
@@ -405,14 +588,15 @@ const Billing = () => {
   // Clear bill
   const clearBill = () => {
     setBillItems([]);
-    setSelectedSeller(null);
     setDiscount(0);
     setAmountPaid(0);
+    setCashReceived('');
+    setWholesaleDueDate('');
+    setDeliveryChallanNumber('');
     setIsFullyPaid(false);
     setCustomerPreviousRemaining(0);
     setProductSearch('');
     setCustomerSearch('');
-    setSellerSearch('');
     setSelectedProductId('');
     setLineQuantity(1);
     setLineUnitPrice('');
@@ -421,30 +605,39 @@ const Billing = () => {
   // Generate bill
   const generateBill = async () => {
     if (billItems.length === 0) {
-      alert('Please add items to the bill');
+      toast.error('Please add items to the bill');
       return;
     }
 
-    if (!selectedSeller) {
-      alert('Please select a seller before generating the bill');
+    if (billingChannel === 'wholesale' && !selectedCustomer) {
+      toast.error('Wholesale B2B bills must be linked to a Customer for Khata ledger tracking');
+      return;
+    }
+
+    const finalSeller = selectedSeller || (sellers.length > 0 ? sellers[0] : null);
+    if (billingChannel === 'wholesale' && !finalSeller) {
+      toast.error('Please select a seller or representative for wholesale billing');
       return;
     }
 
     setIsGenerating(true);
 
     try {
+      const cashReceivedNum = Number(cashReceived || 0);
+      const changeReturnedNum = Math.max(0, cashReceivedNum - total);
+
       const billData = {
         customer: selectedCustomer,
-        sellerId: selectedSeller._id,
-        items: billItems.map(item => ({
+        sellerId: finalSeller ? finalSeller._id : undefined,
+        items: billItems.map((item) => ({
           productId: item.productId,
           name: item.name,
           model: item.model,
           category: item.category,
-          selectedPriceType: item.selectedPriceType,
+          selectedPriceType: item.selectedPriceType || 'retailPrice',
           selectedPrice: Number(item.selectedPrice),
           quantity: Number(item.quantity),
-          totalAmount: Number(item.selectedPrice) * Number(item.quantity)
+          totalAmount: Number(item.selectedPrice) * Number(item.quantity),
         })),
         subtotal: Number(subtotal),
         discount: Number(discountAmount),
@@ -454,7 +647,12 @@ const Billing = () => {
         previousRemaining: Number(customerPreviousRemaining || 0),
         remainingAmount: remainingAmount,
         paymentMethod: 'cash',
-        notes: ''
+        notes: '',
+        channel: billingChannel,
+        cashReceived: cashReceivedNum,
+        changeReturned: changeReturnedNum,
+        dueDate: wholesaleDueDate || undefined,
+        deliveryChallanNumber: deliveryChallanNumber || undefined,
       };
 
       const response = await createBill(billData);
@@ -465,20 +663,17 @@ const Billing = () => {
         queryClient.invalidateQueries({ queryKey: ['products'] }),
         queryClient.invalidateQueries({ queryKey: ['sellers'] }),
         queryClient.invalidateQueries({ queryKey: ['bills'] }),
-        queryClient.invalidateQueries({ queryKey: ['billingStats'] })
+        queryClient.invalidateQueries({ queryKey: ['billingStats'] }),
       ]);
 
-      // Clear the current bill after successful generation
       clearBill();
-
-      // Show success message
-      alert('Bill generated successfully!');
-      // Switch to history tab so user sees the new bill
+      toast.success('Bill generated successfully!');
       setActiveTab('history');
     } catch (error) {
       console.error('Error generating bill:', error);
-      const errorMessage = error.response?.data?.message || error.message || 'Failed to generate bill. Please try again.';
-      alert(`Error: ${errorMessage}`);
+      const errorMessage =
+        error.response?.data?.message || error.message || 'Failed to generate bill. Please try again.';
+      toast.error(`Error: ${errorMessage}`);
     } finally {
       setIsGenerating(false);
     }
@@ -584,22 +779,120 @@ const Billing = () => {
 
       {/* Tab Content */}
       {activeTab === 'billing' ? (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left Column - Product Selection & Customer */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* Customer Selection */}
-            <Card className="shadow-xl border-0 bg-white rounded-2xl overflow-visible">
-              <CardHeader className="bg-gradient-to-r from-stone-50 via-stone-100 to-amber-50 border-b border-stone-200">
-                <CardTitle className="text-xl font-bold text-gray-800 flex items-center gap-3">
-                  <div className="p-2 bg-amber-600 rounded-lg">
-                    <User className="text-white" size={20} />
+        <div className="space-y-6">
+          {/* Omnichannel Mode Selector */}
+          <div className="bg-white p-3 rounded-2xl shadow-md border border-slate-200">
+            <div className="flex flex-col sm:flex-row gap-3">
+              <button
+                type="button"
+                onClick={() => handleChannelChange('retail')}
+                className={`flex-1 p-4 rounded-xl flex items-center gap-3 transition-all text-left ${
+                  billingChannel === 'retail'
+                    ? 'bg-gradient-to-r from-emerald-600 to-teal-700 text-white shadow-lg ring-2 ring-emerald-500'
+                    : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200'
+                }`}
+              >
+                <div
+                  className={`p-2.5 rounded-lg ${
+                    billingChannel === 'retail' ? 'bg-white/20' : 'bg-emerald-100 text-emerald-700'
+                  }`}
+                >
+                  <Store size={24} />
+                </div>
+                <div>
+                  <div className="font-bold text-base flex items-center gap-2">
+                    🛒 Retail POS Counter
+                    {billingChannel === 'retail' && (
+                      <span className="text-[10px] uppercase font-extrabold bg-white text-emerald-800 px-2 py-0.5 rounded-full">
+                        ACTIVE
+                      </span>
+                    )}
                   </div>
-                  <div>
-                    <div>Customer Selection</div>
-                    <div className="text-sm font-normal text-amber-700">Choose or search for a customer</div>
+                  <div
+                    className={`text-xs mt-0.5 ${
+                      billingChannel === 'retail' ? 'text-emerald-100' : 'text-slate-500'
+                    }`}
+                  >
+                    Walk-in sales • Hardware scanner • Cashier change calculator
                   </div>
-                </CardTitle>
-              </CardHeader>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleChannelChange('wholesale')}
+                className={`flex-1 p-4 rounded-xl flex items-center gap-3 transition-all text-left ${
+                  billingChannel === 'wholesale'
+                    ? 'bg-gradient-to-r from-blue-600 to-indigo-700 text-white shadow-lg ring-2 ring-blue-500'
+                    : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200'
+                }`}
+              >
+                <div
+                  className={`p-2.5 rounded-lg ${
+                    billingChannel === 'wholesale' ? 'bg-white/20' : 'bg-blue-100 text-blue-700'
+                  }`}
+                >
+                  <Building2 size={24} />
+                </div>
+                <div>
+                  <div className="font-bold text-base flex items-center gap-2">
+                    🏢 Wholesale B2B Billing
+                    {billingChannel === 'wholesale' && (
+                      <span className="text-[10px] uppercase font-extrabold bg-white text-blue-800 px-2 py-0.5 rounded-full">
+                        ACTIVE
+                      </span>
+                    )}
+                  </div>
+                  <div
+                    className={`text-xs mt-0.5 ${
+                      billingChannel === 'wholesale' ? 'text-blue-100' : 'text-slate-500'
+                    }`}
+                  >
+                    Bulk tier auto-pricing • Khata credit ledger • Delivery challans
+                  </div>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          {/* Instant Barcode & Model Scanner */}
+          <div className="bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-100/70 border border-emerald-300 rounded-2xl p-4 shadow-sm">
+            <ScanInput
+              label="Instant Barcode & Model Scanner (بار کوڈ اسکینر)"
+              placeholder="Scan barcode with scanner gun or type product model / name and press Enter..."
+              helperText="Hardware scanner ready: scan barcode directly to instantly add items to the cart."
+              onScan={handleBarcodeScan}
+            />
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Left Column - Product Selection & Customer */}
+            <div className="lg:col-span-2 space-y-6">
+              {/* Customer Selection */}
+              <Card className="shadow-xl border-0 bg-white rounded-2xl overflow-visible">
+                <CardHeader className="bg-gradient-to-r from-stone-50 via-stone-100 to-amber-50 border-b border-stone-200">
+                  <CardTitle className="text-xl font-bold text-gray-800 flex items-center gap-3">
+                    <div className="p-2 bg-amber-600 rounded-lg">
+                      <User className="text-white" size={20} />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span>Customer Selection</span>
+                        {billingChannel === 'wholesale' && (
+                          <span className="text-xs bg-rose-100 text-rose-800 border border-rose-300 px-2 py-0.5 rounded-full font-semibold">
+                            Required for Wholesale
+                          </span>
+                        )}
+                        {billingChannel === 'retail' && (
+                          <span className="text-xs bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded-full font-semibold">
+                            Optional (Walk-in)
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-sm font-normal text-amber-700">Choose or search for a customer</div>
+                    </div>
+                  </CardTitle>
+                </CardHeader>
               <CardBody className="p-6">
                 <div className="relative" ref={customerSearchRef}>
                   <div className="flex items-center gap-3">
@@ -743,12 +1036,18 @@ const Billing = () => {
                               setSelectedProductId(product._id);
                               setProductSearch(`${product.name} (${product.model})`);
                               setShowProductSearch(false);
-                              setLineUnitPrice(product.retailPrice || '');
+                              const suggested =
+                                billingChannel === 'wholesale'
+                                  ? product.wholesalePrice || product.retailPrice || ''
+                                  : product.retailPrice || '';
+                              setLineUnitPrice(suggested);
                             }}
                             className="w-full text-left px-3 py-2 hover:bg-gray-50 border-b border-gray-100 last:border-b-0 text-sm"
                           >
                             <div className="font-medium text-gray-900">{product.name}</div>
-                            <div className="text-xs text-gray-600">Model: {product.model} • {product.category}</div>
+                            <div className="text-xs text-gray-600">
+                              Model: {product.model} • {product.category} • Retail: Rs. {product.retailPrice || 0} • Wholesale: Rs. {product.wholesalePrice || 0}
+                            </div>
                           </button>
                         ))}
                       </div>
@@ -789,6 +1088,9 @@ const Billing = () => {
                       <div className="text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded px-2 py-1">
                         <span className="font-medium">Wholesale:</span>{' '}
                         <span>Rs. {selectedProduct.wholesalePrice ?? 0}</span>
+                        <span className="text-blue-600 font-semibold ml-1">
+                          (≥{selectedProduct.minWholesaleQty || 6} pcs)
+                        </span>
                       </div>
                       <div className="text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded px-2 py-1">
                         <span className="font-medium">Retail:</span>{' '}
@@ -932,9 +1234,21 @@ const Billing = () => {
                     <div className="divide-y divide-gray-100">
                       {billItems.map((item) => (
                         <div key={item.productId} className="p-4">
-                          <div className="flex items-start justify-between mb-3">
+                          <div className="flex items-start justify-between mb-2">
                             <div className="flex-1">
-                              <div className="font-semibold text-gray-900 text-sm">{item.name}</div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-semibold text-gray-900 text-sm">{item.name}</span>
+                                {item.selectedPriceType === 'wholesalePrice' ||
+                                (billingChannel === 'retail' && item.quantity >= (item.minWholesaleQty || 6)) ? (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200">
+                                    🏢 Wholesale Rate (≥{item.minWholesaleQty || 6} pcs)
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                    🛒 Retail Rate
+                                  </span>
+                                )}
+                              </div>
                               <div className="text-xs text-gray-500">Model: {item.model}</div>
                             </div>
                             <Button
@@ -947,9 +1261,39 @@ const Billing = () => {
                             </Button>
                           </div>
 
-                          {/* Unit Price Editing */}
+                          {/* Unit Price Editing & Rate Presets */}
                           <div className="mb-3">
-                            <label className="block text-xs font-medium text-gray-600 mb-1">Unit Price (Rs.)</label>
+                            <div className="flex items-center justify-between mb-1">
+                              <label className="block text-xs font-medium text-gray-600">Unit Price (Rs.)</label>
+                              <div className="flex gap-1.5">
+                                {item.retailPrice > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => updateItemPrice(item.productId, item.retailPrice, 'retailPrice')}
+                                    className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+                                      item.selectedPrice === item.retailPrice
+                                        ? 'bg-emerald-600 text-white border-emerald-600 font-semibold'
+                                        : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                                    }`}
+                                  >
+                                    Retail (Rs. {item.retailPrice})
+                                  </button>
+                                )}
+                                {item.wholesalePrice > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => updateItemPrice(item.productId, item.wholesalePrice, 'wholesalePrice')}
+                                    className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+                                      item.selectedPrice === item.wholesalePrice
+                                        ? 'bg-blue-600 text-white border-blue-600 font-semibold'
+                                        : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                                    }`}
+                                  >
+                                    Wholesale (Rs. {item.wholesalePrice})
+                                  </button>
+                                )}
+                              </div>
+                            </div>
                             <input
                               type="number"
                               min="0"
@@ -1046,6 +1390,138 @@ const Billing = () => {
                   </div>
                 </div>
 
+                {/* Retail POS Cashier Calculator */}
+                {billingChannel === 'retail' && (
+                  <div className="p-4 bg-emerald-50/80 border border-emerald-200 rounded-xl space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold uppercase tracking-wider text-emerald-900 flex items-center gap-1.5">
+                        <DollarSign size={15} /> Cash Tendered (گاہک سے وصول شدہ رقم)
+                      </span>
+                      {Number(cashReceived || 0) > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCashReceived('');
+                            setAmountPaid(0);
+                            setIsFullyPaid(false);
+                          }}
+                          className="text-[11px] text-gray-500 hover:text-rose-600 transition-colors"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Quick PKR Cash Buttons */}
+                    <div className="grid grid-cols-5 gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => handleQuickCash(total)}
+                        className="px-2 py-1.5 text-xs font-semibold bg-white border border-emerald-300 rounded hover:bg-emerald-100 text-emerald-800 transition-colors shadow-xs"
+                      >
+                        Exact
+                      </button>
+                      {[500, 1000, 2000, 5000].map((denom) => (
+                        <button
+                          key={denom}
+                          type="button"
+                          onClick={() => handleQuickCash(denom)}
+                          className={`px-1.5 py-1.5 text-xs font-semibold border rounded transition-colors ${
+                            Number(cashReceived) === denom
+                              ? 'bg-emerald-700 text-white border-emerald-700 shadow-sm'
+                              : 'bg-white text-gray-700 border-gray-300 hover:bg-emerald-50'
+                          }`}
+                        >
+                          {denom >= 1000 ? `${denom / 1000}k` : denom}
+                        </button>
+                      ))}
+                    </div>
+
+                    <input
+                      type="number"
+                      min="0"
+                      placeholder="Type cash tendered (Rs.)..."
+                      value={cashReceived}
+                      onChange={(e) => handleCashReceivedChange(e.target.value)}
+                      className="w-full px-3 py-2 text-base font-bold text-gray-800 bg-white border border-emerald-300 rounded-lg focus:ring-2 focus:ring-emerald-500"
+                    />
+
+                    {/* Live Change Calculation Box */}
+                    {Number(cashReceived || 0) >= total && total > 0 ? (
+                      <div className="p-3 bg-gradient-to-r from-emerald-600 to-teal-700 text-white rounded-lg shadow-sm">
+                        <div className="text-[11px] uppercase tracking-wider font-semibold text-emerald-100">
+                          Change to Return (واپسی رقم)
+                        </div>
+                        <div className="text-2xl font-black mt-0.5">
+                          Rs. {(Number(cashReceived) - total).toLocaleString('en-PK')}
+                        </div>
+                      </div>
+                    ) : Number(cashReceived || 0) > 0 && Number(cashReceived) < total ? (
+                      <div className="p-2.5 bg-amber-100 border border-amber-300 text-amber-900 rounded-lg text-xs flex items-center justify-between">
+                        <span>Short by (بقایا رقم):</span>
+                        <span className="font-bold text-sm text-amber-900">
+                          Rs. {(total - Number(cashReceived)).toLocaleString('en-PK')}
+                        </span>
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+
+                {/* Wholesale B2B Credit & Challan Fields */}
+                {billingChannel === 'wholesale' && (
+                  <div className="p-4 bg-blue-50/80 border border-blue-200 rounded-xl space-y-3">
+                    <div className="text-xs font-bold uppercase tracking-wider text-blue-900 flex items-center gap-1.5">
+                      <Building2 size={15} /> Wholesale B2B Terms & Khata
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1 flex items-center gap-1">
+                        <Truck size={13} className="text-blue-600" /> Delivery Challan #
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. DC-1085"
+                        value={deliveryChallanNumber}
+                        onChange={(e) => setDeliveryChallanNumber(e.target.value)}
+                        className="w-full text-xs px-3 py-2 bg-white border border-blue-200 rounded-lg focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1 flex items-center gap-1">
+                        <Calendar size={13} className="text-blue-600" /> Payment Due Date (ادائیگی کی تاریخ)
+                      </label>
+                      <input
+                        type="date"
+                        value={wholesaleDueDate}
+                        onChange={(e) => setWholesaleDueDate(e.target.value)}
+                        className="w-full text-xs px-3 py-2 bg-white border border-blue-200 rounded-lg focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+
+                    {selectedCustomer && (
+                      <div className="mt-2 pt-2 border-t border-blue-200 text-xs space-y-1">
+                        <div className="flex justify-between text-gray-600">
+                          <span>Previous Khata Due:</span>
+                          <span className="font-semibold text-gray-800">
+                            Rs. {customerPreviousRemaining.toLocaleString('en-PK')}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-gray-600">
+                          <span>Current Bill Unpaid:</span>
+                          <span className="font-semibold text-rose-600">
+                            Rs. {remainingAmount.toLocaleString('en-PK')}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-sm font-bold text-blue-900 pt-1 border-t border-blue-200">
+                          <span>Total Outstanding:</span>
+                          <span>Rs. {(customerPreviousRemaining + remainingAmount).toLocaleString('en-PK')}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Amount Paid & Remaining */}
                 <div className="space-y-3 pt-4 border-t border-gray-200">
                   <div>
@@ -1126,6 +1602,7 @@ const Billing = () => {
               </CardBody>
             </Card>
           </div>
+        </div>
         </div>
       ) : activeTab === 'history' ? (
         <BillingHistory />

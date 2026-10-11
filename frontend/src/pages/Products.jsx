@@ -42,7 +42,11 @@ const Products = () => {
     retailPrice: '',
     websitePrice: '',
     stock: '',
-    barcode: ''
+    barcode: '',
+    minWholesaleQty: 6,
+    isRetailAvailable: true,
+    isWholesaleAvailable: true,
+    isOnlineAvailable: true
   });
   const [categories, setCategories] = useState([]); // local copy for CategoryManager integration
   const [showLowStockOnly, setShowLowStockOnly] = useState(false);
@@ -153,7 +157,11 @@ const Products = () => {
       retailPrice: product.retailPrice,
       websitePrice: product.websitePrice,
       stock: product.stock,
-      barcode: product.barcode || ''
+      barcode: product.barcode || '',
+      minWholesaleQty: product.minWholesaleQty !== undefined ? product.minWholesaleQty : 6,
+      isRetailAvailable: product.isRetailAvailable !== undefined ? product.isRetailAvailable : true,
+      isWholesaleAvailable: product.isWholesaleAvailable !== undefined ? product.isWholesaleAvailable : true,
+      isOnlineAvailable: product.isOnlineAvailable !== undefined ? product.isOnlineAvailable : true
     });
     setIsModalOpen(true);
   };
@@ -184,7 +192,11 @@ const Products = () => {
       retailPrice: '',
       websitePrice: '',
       stock: '',
-      barcode: ''
+      barcode: '',
+      minWholesaleQty: 6,
+      isRetailAvailable: true,
+      isWholesaleAvailable: true,
+      isOnlineAvailable: true
     });
     setEditingProduct(null);
   };
@@ -651,7 +663,9 @@ const Products = () => {
                           <div className="font-semibold text-blue-600">
                             Rs. {product.wholesalePrice?.toLocaleString('en-PK') || 'N/A'}
                           </div>
-                          <div className="text-xs text-gray-500">Wholesale</div>
+                          <div className="text-xs text-gray-500">
+                            Wholesale <span className="text-blue-600 font-medium">({product.minWholesaleQty ? `≥${product.minWholesaleQty} pcs` : '≥6 pcs'})</span>
+                          </div>
                         </td>
 
                         {/* Retail Price */}
@@ -887,15 +901,67 @@ const Products = () => {
             </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Initial Stock</label>
-            <input
-              type="number"
-              required
-              value={formData.stock}
-              onChange={(e) => setFormData({ ...formData, stock: e.target.value })}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Initial Stock</label>
+              <input
+                type="number"
+                required
+                value={formData.stock}
+                onChange={(e) => setFormData({ ...formData, stock: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Min Wholesale Qty (Tier Threshold)
+              </label>
+              <input
+                type="number"
+                min="1"
+                value={formData.minWholesaleQty}
+                onChange={(e) => setFormData({ ...formData, minWholesaleQty: Number(e.target.value) || 1 })}
+                className="w-full px-4 py-2 border border-blue-300 bg-blue-50/50 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="Default: 6 pcs"
+              />
+              <p className="text-[11px] text-gray-500 mt-1">Cart auto-applies wholesale rate at this quantity</p>
+            </div>
+          </div>
+
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
+            <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-2">
+              Omnichannel Sales Channels
+            </label>
+            <div className="grid grid-cols-3 gap-3">
+              <label className="flex items-center gap-2 text-xs font-medium text-gray-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formData.isRetailAvailable}
+                  onChange={(e) => setFormData({ ...formData, isRetailAvailable: e.target.checked })}
+                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span>🛒 Retail POS</span>
+              </label>
+              <label className="flex items-center gap-2 text-xs font-medium text-gray-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formData.isWholesaleAvailable}
+                  onChange={(e) => setFormData({ ...formData, isWholesaleAvailable: e.target.checked })}
+                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span>🏢 Wholesale B2B</span>
+              </label>
+              <label className="flex items-center gap-2 text-xs font-medium text-gray-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formData.isOnlineAvailable}
+                  onChange={(e) => setFormData({ ...formData, isOnlineAvailable: e.target.checked })}
+                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span>🌐 Online Store</span>
+              </label>
+            </div>
           </div>
 
           <div className="flex gap-3 mt-6">

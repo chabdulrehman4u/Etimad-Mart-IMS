@@ -35,6 +35,11 @@ export const getBills = async (req, res) => {
       filter.status = req.query.status;
     }
 
+    // Channel filter (retail, wholesale, online)
+    if (req.query.channel) {
+      filter.channel = req.query.channel;
+    }
+
     // Search by bill number or customer name
     if (req.query.search) {
       filter.$or = [
@@ -86,10 +91,34 @@ export const getBillById = async (req, res) => {
 // Create new bill
 export const createBill = async (req, res) => {
   try {
-    const { customer, items, subtotal, discount, discountType, total, amountPaid, previousRemaining, remainingAmount, paymentMethod, notes, sellerId } = req.body;
+    const {
+      customer,
+      items,
+      subtotal,
+      discount,
+      discountType,
+      total,
+      amountPaid,
+      previousRemaining,
+      remainingAmount,
+      paymentMethod,
+      notes,
+      sellerId,
+      channel = 'retail',
+      cashReceived = 0,
+      changeReturned = 0,
+      dueDate,
+      deliveryChallanNumber,
+    } = req.body;
 
-    if (!sellerId) {
-      return res.status(400).json({ message: 'Seller is required for billing' });
+    let finalSellerId = sellerId;
+    if (!finalSellerId) {
+      const defaultSeller = await Seller.findOne({ isActive: true });
+      finalSellerId = defaultSeller ? defaultSeller._id : null;
+    }
+
+    if (!finalSellerId && channel === 'wholesale') {
+      return res.status(400).json({ message: 'Seller or representative is required for wholesale billing' });
     }
 
     const embeddedCustomer = customer ? {
@@ -120,10 +149,17 @@ export const createBill = async (req, res) => {
     const prevRemaining = Number(previousRemaining ?? 0);
     // Global remaining = previous remaining + this bill total - amount paid
     const globalRemaining = prevRemaining + numericTotal - numericAmountPaid;
+    const tenantId = req.tenantId || req.user?.tenantId;
 
     const bill = new Bill({
-      seller: sellerId,
+      seller: finalSellerId,
       customer: embeddedCustomer,
+      channel: channel || 'retail',
+      cashReceived: Number(cashReceived || 0),
+      changeReturned: Number(changeReturned || 0),
+      dueDate: dueDate ? new Date(dueDate) : undefined,
+      deliveryChallanNumber: deliveryChallanNumber || undefined,
+      tenantId,
       items: items.map(item => ({
         ...item,
         totalAmount: item.selectedPrice * item.quantity

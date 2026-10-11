@@ -46,7 +46,32 @@ const billSchema = new mongoose.Schema({
   seller: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Seller',
-    required: true
+    required: false
+  },
+  channel: {
+    type: String,
+    enum: ['retail', 'wholesale', 'online'],
+    default: 'retail',
+    index: true
+  },
+  cashReceived: {
+    type: Number,
+    default: 0
+  },
+  changeReturned: {
+    type: Number,
+    default: 0
+  },
+  dueDate: {
+    type: Date
+  },
+  deliveryChallanNumber: {
+    type: String
+  },
+  tenantId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Tenant',
+    index: true
   },
   customer: {
     type: mongoose.Schema.Types.Mixed,
