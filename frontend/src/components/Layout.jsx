@@ -219,16 +219,16 @@ const Layout = () => {
               </h2>
             </div>
             <div className="flex items-center gap-3">
-              <Link
-                to="/"
+              <a
+                href="https://etimadmart.com"
                 target="_blank"
                 rel="noreferrer"
                 className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold border border-blue-200 transition shadow-sm"
               >
                 <Globe size={14} />
-                <span>View Live Storefront</span>
+                <span>Live Website (etimadmart.com)</span>
                 <ExternalLink size={12} />
-              </Link>
+              </a>
               <div className="hidden sm:flex items-center px-3 py-1 rounded-full bg-slate-100 border border-slate-200 text-xs font-medium text-slate-700">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 mr-2"></span>
                 {getRoleLabel()}

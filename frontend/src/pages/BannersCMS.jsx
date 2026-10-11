@@ -344,3 +344,4 @@ const BannersCMS = () => {
 };
 
 export default BannersCMS;
+
