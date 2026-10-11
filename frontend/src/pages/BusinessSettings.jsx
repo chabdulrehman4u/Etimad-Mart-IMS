@@ -16,10 +16,15 @@ import {
   FileText,
   BadgeCheck,
   Percent,
+  Copy,
+  Check,
+  ExternalLink,
+  Code2,
 } from 'lucide-react';
 import Card, { CardBody, CardHeader, CardTitle } from '../components/Card';
 import Button from '../components/Button';
 import { getCurrentTenant, updateCurrentTenant } from '../services/api';
+import { baseURL } from '../services/baseURL';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
 
@@ -64,6 +69,14 @@ const BusinessSettings = () => {
       },
     },
   });
+
+  const [copiedKey, setCopiedKey] = useState(null);
+
+  const handleCopy = (key, text) => {
+    navigator.clipboard.writeText(text);
+    setCopiedKey(key);
+    setTimeout(() => setCopiedKey(null), 2000);
+  };
 
   const { data: tenantData, isLoading } = useQuery({
     queryKey: ['currentTenant'],
@@ -561,6 +574,155 @@ const BusinessSettings = () => {
             </CardBody>
           </Card>
         </div>
+
+        {/* Online Storefront & Web Bridge Card */}
+        <Card className="border-indigo-200/80 shadow-md">
+          <CardHeader className="bg-gradient-to-r from-indigo-50/80 via-white to-purple-50/50 border-b border-indigo-100 pb-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-indigo-600 text-white rounded-lg shadow-sm">
+                  <Globe size={18} />
+                </div>
+                <div>
+                  <CardTitle className="text-base font-bold text-gray-900">
+                    Online Storefront & Web Bridge (REST API Integration)
+                  </CardTitle>
+                  <p className="text-xs text-gray-500">
+                    Connect your public e-commerce store (<code className="text-indigo-600 font-semibold">etimadmart.com</code>) to central IMS stock in real-time.
+                  </p>
+                </div>
+              </div>
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                Real-Time Stock Sync Active
+              </span>
+            </div>
+          </CardHeader>
+          <CardBody className="p-6 space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200">
+              <div>
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">Public Tenant Slug</span>
+                <p className="text-sm font-bold text-slate-800 font-mono mt-0.5">{formData.slug || 'etimadmart'}</p>
+              </div>
+              <div>
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">Live Customer Storefront</span>
+                <p className="text-sm font-bold text-indigo-600 mt-0.5">
+                  <a href="https://etimadmart.com" target="_blank" rel="noreferrer" className="hover:underline inline-flex items-center gap-1">
+                    https://etimadmart.com <ExternalLink size={12} />
+                  </a>
+                </p>
+              </div>
+              <div>
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">Public API Root</span>
+                <p className="text-xs font-medium text-slate-600 font-mono mt-0.5 truncate" title={`${baseURL}/storefront/${formData.slug || 'etimadmart'}`}>
+                  {`${baseURL}/storefront/${formData.slug || 'etimadmart'}`}
+                </p>
+              </div>
+            </div>
+
+            {/* Endpoints Table / Cards */}
+            <div className="space-y-3">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-gray-700 flex items-center gap-1.5">
+                <Code2 size={15} className="text-indigo-600" />
+                Storefront API Endpoints
+              </h4>
+
+              <div className="space-y-3">
+                {/* 1. Catalog API */}
+                <div className="p-4 bg-white border border-gray-200 rounded-xl hover:border-indigo-300 transition-colors shadow-sm">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">GET</span>
+                      <code className="text-xs font-mono font-semibold text-gray-900 break-all">
+                        {`${baseURL}/storefront/${formData.slug || 'etimadmart'}/catalog`}
+                      </code>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleCopy('catalog', `${baseURL}/storefront/${formData.slug || 'etimadmart'}/catalog`)}
+                        className="text-xs flex items-center gap-1 px-2.5 py-1 rounded-lg border border-gray-300 hover:bg-gray-50 text-gray-700 transition"
+                      >
+                        {copiedKey === 'catalog' ? <Check size={12} className="text-emerald-600" /> : <Copy size={12} />}
+                        {copiedKey === 'catalog' ? 'Copied' : 'Copy URL'}
+                      </button>
+                      <a
+                        href={`${baseURL}/storefront/${formData.slug || 'etimadmart'}/catalog`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 text-indigo-700 transition"
+                      >
+                        <ExternalLink size={12} /> Test Live
+                      </a>
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-600">
+                    Returns public inventory catalog with real-time stock balances and online pricing. Use this to render product listings on <code className="text-slate-800">etimadmart.com</code>.
+                  </p>
+                </div>
+
+                {/* 2. Place Order API */}
+                <div className="p-4 bg-white border border-gray-200 rounded-xl hover:border-indigo-300 transition-colors shadow-sm">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-blue-100 text-blue-800 border border-blue-200">POST</span>
+                      <code className="text-xs font-mono font-semibold text-gray-900 break-all">
+                        {`${baseURL}/storefront/${formData.slug || 'etimadmart'}/orders`}
+                      </code>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleCopy('orders', `${baseURL}/storefront/${formData.slug || 'etimadmart'}/orders`)}
+                      className="text-xs flex items-center gap-1 px-2.5 py-1 rounded-lg border border-gray-300 hover:bg-gray-50 text-gray-700 transition"
+                    >
+                      {copiedKey === 'orders' ? <Check size={12} className="text-emerald-600" /> : <Copy size={12} />}
+                      {copiedKey === 'orders' ? 'Copied' : 'Copy URL'}
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-600">
+                    Direct COD checkout endpoint. Automatically verifies physical stock, decrements central inventory, creates an Online Order (<code className="text-slate-800">WEB-1001</code>), and alerts the warehouse dispatch team.
+                  </p>
+                </div>
+
+                {/* 3. Order Tracking API */}
+                <div className="p-4 bg-white border border-gray-200 rounded-xl hover:border-indigo-300 transition-colors shadow-sm">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">GET</span>
+                      <code className="text-xs font-mono font-semibold text-gray-900 break-all">
+                        {`${baseURL}/storefront/${formData.slug || 'etimadmart'}/track/:orderNumberOrPhone`}
+                      </code>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleCopy('track', `${baseURL}/storefront/${formData.slug || 'etimadmart'}/track/WEB-1001`)}
+                      className="text-xs flex items-center gap-1 px-2.5 py-1 rounded-lg border border-gray-300 hover:bg-gray-50 text-gray-700 transition"
+                    >
+                      {copiedKey === 'track' ? <Check size={12} className="text-emerald-600" /> : <Copy size={12} />}
+                      {copiedKey === 'track' ? 'Copied' : 'Copy URL'}
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-600">
+                    Live parcel tracking endpoint for customers to track order verification, dispatch, and courier CN (Leopards / PostEx / Trax) on <code className="text-slate-800">etimadmart.com</code>.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Integration Instructions */}
+            <div className="bg-indigo-50/50 border border-indigo-100 rounded-xl p-4 text-xs text-indigo-950 space-y-2">
+              <div className="font-semibold flex items-center gap-1.5 text-indigo-900">
+                <CheckCircle size={15} className="text-indigo-600" />
+                How Real-Time Sync Works:
+              </div>
+              <ul className="list-disc pl-5 space-y-1 text-slate-700">
+                <li>When a sale is made in retail POS or wholesale, central inventory decrements immediately, reflecting instantaneously in the online catalog API.</li>
+                <li>When an online shopper places an order on <span className="font-medium text-slate-900">etimadmart.com</span>, stock is decremented immediately to prevent overselling.</li>
+                <li>Dispatch teams view incoming orders under <span className="font-semibold text-indigo-700">Online Store Orders</span> in the IMS, verify via WhatsApp, and generate thermal courier shipping labels.</li>
+              </ul>
+            </div>
+          </CardBody>
+        </Card>
       </form>
     </div>
   );

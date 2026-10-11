@@ -94,3 +94,5 @@ export const resolveTenant = async (req, res, next) => {
   }
 };
 
+export const tenantMiddleware = resolveTenant;
+

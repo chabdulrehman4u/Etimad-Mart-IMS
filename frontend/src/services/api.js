@@ -211,4 +211,12 @@ export const getTenantPublicProfile = (slug) => api.get(`/tenant/public/${encode
 export const getAllTenants = () => api.get('/tenant/all');
 export const createTenant = (data) => api.post('/tenant', data);
 
+// Etimad Suite — Online Storefront & E-commerce Orders
+export const getOnlineOrders = (params) => api.get('/online-orders', { params });
+export const getOnlineOrderStats = () => api.get('/online-orders/stats');
+export const getOnlineOrderById = (id) => api.get(`/online-orders/${id}`);
+export const updateOnlineOrderStatus = (id, data) => api.patch(`/online-orders/${id}/status`, data);
+export const bookOnlineOrderCourier = (id, data) => api.post(`/online-orders/${id}/book-courier`, data);
+export const convertOnlineOrderToBill = (id) => api.post(`/online-orders/${id}/convert-to-bill`);
+
 export default api;

@@ -22,6 +22,7 @@ import {
   Boxes,
   Landmark,
   Building2,
+  Globe,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useNotifications } from '../context/NotificationContext';
@@ -51,6 +52,7 @@ const Layout = () => {
     { path: '/sellers', icon: Users, label: 'Sellers', roles: ['admin', 'superadmin', 'manager'] },
     { path: '/customers', icon: UserCircle, label: 'Customers', roles: ['admin', 'superadmin', 'manager'] },
     { path: '/billing', icon: Receipt, label: 'Billing', roles: ['admin', 'superadmin', 'manager'] },
+    { path: '/online-orders', icon: Globe, label: 'Online Store Orders', roles: ['admin', 'superadmin', 'manager'] },
     { path: '/finance', icon: Landmark, label: 'Finance & Accounts', roles: ['admin', 'superadmin', 'manager'] },
     { path: '/sales', icon: ShoppingCart, label: 'Sales', roles: ['admin', 'superadmin'] },
     { path: '/expenses', icon: Wallet, label: 'Expenses', roles: ['admin', 'superadmin', 'manager'] },

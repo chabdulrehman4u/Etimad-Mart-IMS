@@ -28,6 +28,7 @@ const SellerDashboard = lazy(() => import('./pages/SellerDashboard'));
 const SellerPasswordChange = lazy(() => import('./pages/SellerPasswordChange'));
 const AdminManagement = lazy(() => import('./pages/AdminManagement'));
 const BusinessSettings = lazy(() => import('./pages/BusinessSettings'));
+const OnlineOrders = lazy(() => import('./pages/OnlineOrders'));
 const FinanceDashboard = lazy(() => import('./pages/finance/FinanceDashboard'));
 
 const App = () => {
@@ -68,6 +69,7 @@ const App = () => {
                 <Route path="customers" element={<Customers />} />
                 <Route path="billing" element={<Billing />} />
                 <Route path="billing/edit/:id" element={<EditBill />} />
+                <Route path="online-orders" element={<OnlineOrders />} />
                 <Route path="finance" element={<FinanceDashboard />} />
                 <Route path="finance/*" element={<FinanceDashboard />} />
                 <Route path="purchase-batches" element={<PurchaseBatches />} />

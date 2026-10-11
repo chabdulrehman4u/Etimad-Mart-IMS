@@ -32,6 +32,8 @@ import purchaseBatchRoutes from './routes/purchase-batches.js';
 import financeRoutes from './routes/finance.js';
 import sellerDispatchRoutes from './routes/seller-dispatch.js';
 import tenantRoutes from './routes/tenant.js';
+import storefrontRoutes from './routes/storefront.js';
+import onlineOrderRoutes from './routes/online-orders.js';
 
 // Import middleware
 import { authenticate } from './middleware/auth.js';
@@ -62,12 +64,15 @@ const allowedOrigins = [
   'http://127.0.0.1:4000',
   'https://imsforetimad.vercel.app',
   'https://etimad-mart-ims.vercel.app',
+  'https://etimadmart.com',
+  'https://www.etimadmart.com',
+  'https://etimadmart.vercel.app',
   ...(process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(',').map(s => s.trim()) : [])
 ].filter(Boolean);
 
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin) || /^https:\/\/.*\.vercel\.app$/.test(origin)) {
+    if (!origin || allowedOrigins.includes(origin) || /^https:\/\/.*\.vercel\.app$/.test(origin) || /^https:\/\/.*\.etimadmart\.com$/.test(origin)) {
       return callback(null, true);
     }
     return callback(null, false);
@@ -89,6 +94,7 @@ if (process.env.NODE_ENV !== 'production') {
 // API Routes
 // Public routes
 app.use('/api/auth', authRoutes);
+app.use('/api/storefront', cors(), storefrontRoutes);
 
 // Protected routes (require authentication)
 app.use('/api/categories', authenticate, categoryRoutes);
@@ -114,6 +120,7 @@ app.use('/api/purchase-batches', authenticate, purchaseBatchRoutes);
 app.use('/api/finance', authenticate, financeRoutes);
 app.use('/api/seller-dispatch', authenticate, sellerDispatchRoutes);
 app.use('/api/tenant', tenantRoutes);
+app.use('/api/online-orders', onlineOrderRoutes);
 
 // Serve frontend static files from Vite dist folder
 const frontendDistPath = path.join(__dirname, '../frontend/dist');
