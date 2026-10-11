@@ -538,3 +538,34 @@ export const createProductReview = async (req, res) => {
   }
 };
 
+export const getPublicCategories = async (req, res) => {
+  try {
+    const tenantId = await getTenantId(req);
+    const categories = await Category.find({ ...(tenantId ? { tenantId } : {}) }).sort({ name: 1 });
+    res.json(categories);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+export const getAllReviewsAdmin = async (req, res) => {
+  try {
+    const tenantId = await getTenantId(req);
+    const reviews = await Review.find({ ...(tenantId ? { tenantId } : {}) }).sort({ createdAt: -1 });
+    res.json(reviews);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+export const deleteReview = async (req, res) => {
+  try {
+    const tenantId = await getTenantId(req);
+    await Review.findOneAndDelete({ _id: req.params.id, ...(tenantId ? { tenantId } : {}) });
+    res.json({ success: true, message: 'Review deleted' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+

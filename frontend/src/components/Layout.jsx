@@ -23,6 +23,13 @@ import {
   Landmark,
   Building2,
   Globe,
+  Image as ImageIcon,
+  Tag,
+  FolderTree,
+  FileText,
+  Sparkles,
+  Store,
+  ExternalLink,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useNotifications } from '../context/NotificationContext';
@@ -44,24 +51,34 @@ const Layout = () => {
   };
 
   const allNavItems = [
-    { path: '/', icon: LayoutDashboard, label: 'Dashboard', roles: ['admin', 'superadmin'] },
-    { path: '/business-settings', icon: Building2, label: 'Store Settings', roles: ['admin', 'superadmin'] },
-    { path: '/admin-management', icon: Shield, label: 'Admins', roles: ['admin', 'superadmin'] },
-    { path: '/products', icon: Package, label: 'Products', roles: ['admin', 'superadmin', 'manager'] },
+    { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', roles: ['admin', 'superadmin'] },
+    { path: '/products', icon: Package, label: 'Products & Inventory', roles: ['admin', 'superadmin', 'manager'] },
+    { path: '/billing', icon: Receipt, label: 'Retail & Wholesale POS', roles: ['admin', 'superadmin', 'manager'] },
+    { path: '/online-orders', icon: Globe, label: 'Online Store Orders', roles: ['admin', 'superadmin', 'manager'] },
+    
+    // Storefront & CMS Management
+    { path: '/banners-cms', icon: ImageIcon, label: 'Hero Banners', roles: ['admin', 'superadmin', 'manager'] },
+    { path: '/coupons-cms', icon: Tag, label: 'Coupons & Vouchers', roles: ['admin', 'superadmin', 'manager'] },
+    { path: '/categories-cms', icon: FolderTree, label: 'Store Categories', roles: ['admin', 'superadmin', 'manager'] },
+    { path: '/blogs-cms', icon: FileText, label: 'Articles & Blogs', roles: ['admin', 'superadmin', 'manager'] },
+    { path: '/storefront-cms', icon: Sparkles, label: 'Storefront Popups', roles: ['admin', 'superadmin', 'manager'] },
+    { path: '/brands-reviews-cms', icon: Store, label: 'Brands & Reviews', roles: ['admin', 'superadmin', 'manager'] },
+
+    // Operations & Finance
+    { path: '/finance', icon: Landmark, label: 'Finance & Accounts', roles: ['admin', 'superadmin', 'manager'] },
     { path: '/purchase-batches', icon: Boxes, label: 'Purchase Batches', roles: ['admin', 'superadmin', 'manager'] },
     { path: '/sellers', icon: Users, label: 'Sellers', roles: ['admin', 'superadmin', 'manager'] },
     { path: '/customers', icon: UserCircle, label: 'Customers', roles: ['admin', 'superadmin', 'manager'] },
-    { path: '/billing', icon: Receipt, label: 'Billing', roles: ['admin', 'superadmin', 'manager'] },
-    { path: '/online-orders', icon: Globe, label: 'Online Store Orders', roles: ['admin', 'superadmin', 'manager'] },
-    { path: '/finance', icon: Landmark, label: 'Finance & Accounts', roles: ['admin', 'superadmin', 'manager'] },
-    { path: '/sales', icon: ShoppingCart, label: 'Sales', roles: ['admin', 'superadmin'] },
+    { path: '/sales', icon: ShoppingCart, label: 'Sales Records', roles: ['admin', 'superadmin'] },
     { path: '/expenses', icon: Wallet, label: 'Expenses', roles: ['admin', 'superadmin', 'manager'] },
     { path: '/income', icon: DollarSign, label: 'Income', roles: ['admin', 'superadmin', 'manager'] },
     { path: '/returns', icon: RotateCcw, label: 'Returns', roles: ['admin', 'superadmin', 'manager'] },
     { path: '/adspend', icon: Megaphone, label: 'AdSpend', roles: ['admin', 'superadmin', 'manager'] },
-    { path: '/lcs', icon: PawPrint, label: 'LCS', roles: ['admin', 'superadmin', 'manager'] },
+    { path: '/lcs', icon: PawPrint, label: 'LCS Logistics', roles: ['admin', 'superadmin', 'manager'] },
     { path: '/po', icon: Truck, label: 'PO', roles: ['admin', 'superadmin', 'manager'] },
     { path: '/book-po', icon: BookOpen, label: 'Book PO', roles: ['admin', 'superadmin', 'manager'] },
+    { path: '/business-settings', icon: Building2, label: 'Store Settings', roles: ['admin', 'superadmin'] },
+    { path: '/admin-management', icon: Shield, label: 'Admins', roles: ['admin', 'superadmin'] },
   ];
 
   const navItems = allNavItems.filter(item => !item.roles || item.roles.includes(role));
@@ -202,6 +219,16 @@ const Layout = () => {
               </h2>
             </div>
             <div className="flex items-center gap-3">
+              <Link
+                to="/"
+                target="_blank"
+                rel="noreferrer"
+                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold border border-blue-200 transition shadow-sm"
+              >
+                <Globe size={14} />
+                <span>View Live Storefront</span>
+                <ExternalLink size={12} />
+              </Link>
               <div className="hidden sm:flex items-center px-3 py-1 rounded-full bg-slate-100 border border-slate-200 text-xs font-medium text-slate-700">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 mr-2"></span>
                 {getRoleLabel()}

@@ -5,6 +5,7 @@ import {
   getStorefrontProduct,
   createStorefrontOrder,
   trackStorefrontOrder,
+  getStorefrontHomepageData,
 } from '../controllers/storefrontController.js';
 
 const router = express.Router();
@@ -13,6 +14,8 @@ const router = express.Router();
 router.get('/:slug/profile', getStorefrontProfile);
 router.get('/:slug/catalog', getStorefrontCatalog);
 router.get('/:slug/product/getAll', getStorefrontCatalog); // Alias
+router.get('/:slug/homepage', getStorefrontHomepageData);
+router.get('/:slug/homepage-data', getStorefrontHomepageData);
 router.get('/:slug/product/:idOrModel', getStorefrontProduct);
 router.post('/:slug/orders', createStorefrontOrder);
 router.post('/:slug/order/create', createStorefrontOrder); // Alias

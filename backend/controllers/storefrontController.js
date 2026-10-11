@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import Tenant from '../models/Tenant.js';
 import Product from '../models/Product.js';
 import OnlineOrder from '../models/OnlineOrder.js';
@@ -83,7 +84,7 @@ export const getStorefrontCatalog = async (req, res) => {
     const skip = (Number(page) - 1) * Number(limit);
     const [products, totalCount] = await Promise.all([
       Product.find(query)
-        .select('name model category websitePrice retailPrice stock barcode originalPrice')
+        .select('name model category websitePrice retailPrice stock barcode originalPrice images slug description longDescription brand subCategory sold averageRating freeShipping')
         .sort({ stock: -1, createdAt: -1 })
         .skip(skip)
         .limit(Number(limit)),
@@ -93,18 +94,31 @@ export const getStorefrontCatalog = async (req, res) => {
     const formatted = products.map((p) => {
       const price = Number(p.websitePrice || p.retailPrice || 0);
       const title = p.model ? `${p.name} ${p.model}` : p.name;
-      const slug = (p.model ? `${p.name}-${p.model}` : p.name)
+      const productSlug = p.slug || (p.model ? `${p.name}-${p.model}` : p.name)
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/(^-|-$)/g, '');
+      const productImages = (p.images && p.images.length > 0)
+        ? p.images
+        : [
+            {
+              url: `https://images.unsplash.com/photo-1585747860715-2ba37e788b70?auto=format&fit=crop&w=400&q=80`,
+              alt: title,
+            },
+          ];
+
       return {
         _id: p._id,
         id: p._id,
         name: p.name,
         title,
         model: p.model,
-        slug,
+        slug: productSlug,
         category: p.category,
+        brand: p.brand || '',
+        subCategory: p.subCategory || '',
+        description: p.description || '',
+        longDescription: p.longDescription || '',
         price: Math.round(price * 1.15), // Crossed-out MSRP anchor
         salePrice: price,
         websitePrice: Number(p.websitePrice || 0),
@@ -112,13 +126,10 @@ export const getStorefrontCatalog = async (req, res) => {
         inStock: Number(p.stock || 0) > 0,
         stock: Number(p.stock || 0),
         barcode: p.barcode || '',
-        freeShipping: false,
-        images: [
-          {
-            url: `https://images.unsplash.com/photo-1585747860715-2ba37e788b70?auto=format&fit=crop&w=400&q=80`,
-            alt: title,
-          },
-        ],
+        freeShipping: p.freeShipping || false,
+        sold: p.sold || 0,
+        averageRating: p.averageRating || 5,
+        images: productImages,
       };
     });
 
@@ -156,7 +167,7 @@ export const getStorefrontProduct = async (req, res) => {
     if (idOrModel.match(/^[0-9a-fA-F]{24}$/)) {
       query._id = idOrModel;
     } else {
-      query.$or = [{ model: idOrModel }, { barcode: idOrModel }];
+      query.$or = [{ slug: idOrModel }, { model: idOrModel }, { barcode: idOrModel }];
     }
 
     const product = await Product.findOne(query);
@@ -166,6 +177,18 @@ export const getStorefrontProduct = async (req, res) => {
 
     const price = Number(product.websitePrice || product.retailPrice || 0);
     const title = product.model ? `${product.name} ${product.model}` : product.name;
+    const productSlug = product.slug || (product.model ? `${product.name}-${product.model}` : product.name)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/(^-|-$)/g, '');
+    const productImages = (product.images && product.images.length > 0)
+      ? product.images
+      : [
+          {
+            url: `https://images.unsplash.com/photo-1585747860715-2ba37e788b70?auto=format&fit=crop&w=400&q=80`,
+            alt: title,
+          },
+        ];
 
     res.json({
       success: true,
@@ -173,7 +196,12 @@ export const getStorefrontProduct = async (req, res) => {
       name: product.name,
       title,
       model: product.model,
+      slug: productSlug,
       category: product.category,
+      brand: product.brand || '',
+      subCategory: product.subCategory || '',
+      description: product.description || '',
+      longDescription: product.longDescription || '',
       price: Math.round(price * 1.15),
       salePrice: price,
       websitePrice: Number(product.websitePrice || 0),
@@ -181,16 +209,89 @@ export const getStorefrontProduct = async (req, res) => {
       inStock: Number(product.stock || 0) > 0,
       stock: Number(product.stock || 0),
       barcode: product.barcode || '',
-      images: [
-        {
-          url: `https://images.unsplash.com/photo-1585747860715-2ba37e788b70?auto=format&fit=crop&w=400&q=80`,
-          alt: title,
-        },
-      ],
+      freeShipping: product.freeShipping || false,
+      sold: product.sold || 0,
+      averageRating: product.averageRating || 5,
+      images: productImages,
     });
   } catch (err) {
     console.error('Error fetching storefront product:', err);
     res.status(500).json({ message: 'Failed to load product' });
+  }
+};
+
+// 3b. Storefront Homepage Aggregation API
+export const getStorefrontHomepageData = async (req, res) => {
+  try {
+    const { slug } = req.params;
+    const tenant = await resolveTenantBySlug(slug || 'etimadmart');
+    const tenantId = tenant ? tenant._id : null;
+
+    const BannerModel = (await import('../models/Banner.js')).default;
+    const CategoryModel = (await import('../models/Category.js')).default;
+    const BrandModel = (await import('../models/Brand.js')).default;
+    const TopbarModel = (await import('../models/Topbar.js')).default;
+
+    const [banners, categories, brands, products, topbar] = await Promise.all([
+      BannerModel.find({ ...(tenantId ? { tenantId } : {}), isActive: true }).sort({ createdAt: -1 }).limit(6).lean(),
+      CategoryModel.find(tenantId ? { tenantId } : {}).sort({ name: 1 }).limit(16).lean(),
+      BrandModel.find(tenantId ? { tenantId } : {}).limit(12).lean(),
+      Product.find({ ...(tenantId ? { tenantId } : {}), isOnlineAvailable: { $ne: false } })
+        .select('name model category websitePrice retailPrice stock barcode images slug description brand sold averageRating')
+        .sort({ stock: -1, createdAt: -1 })
+        .limit(24)
+        .lean(),
+      TopbarModel.findOne({ ...(tenantId ? { tenantId } : {}), isActive: true }).lean(),
+    ]);
+
+    const formattedProducts = products.map((p) => {
+      const price = Number(p.websitePrice || p.retailPrice || 0);
+      const title = p.model ? `${p.name} ${p.model}` : p.name;
+      const pSlug = p.slug || (p.model ? `${p.name}-${p.model}` : p.name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+      const pImages = (p.images && p.images.length > 0)
+        ? p.images
+        : [{ url: 'https://images.unsplash.com/photo-1585747860715-2ba37e788b70?auto=format&fit=crop&w=400&q=80', alt: title }];
+
+      return {
+        _id: p._id,
+        id: p._id,
+        name: p.name,
+        title,
+        model: p.model,
+        slug: pSlug,
+        category: p.category,
+        brand: p.brand || '',
+        price: Math.round(price * 1.15),
+        salePrice: price,
+        websitePrice: Number(p.websitePrice || 0),
+        retailPrice: Number(p.retailPrice || 0),
+        inStock: Number(p.stock || 0) > 0,
+        stock: Number(p.stock || 0),
+        images: pImages,
+        averageRating: p.averageRating || 5,
+        sold: p.sold || 0,
+      };
+    });
+
+    const featuredProducts = formattedProducts.slice(0, 8);
+    const newProducts = formattedProducts.slice(8, 16);
+    const bestSellers = formattedProducts.slice(16, 24).length ? formattedProducts.slice(16, 24) : formattedProducts.slice(0, 8);
+
+    res.json({
+      success: true,
+      data: {
+        banners,
+        categories,
+        brands,
+        featuredProducts,
+        newProducts,
+        bestSellers,
+        activeTopbar: topbar,
+      },
+    });
+  } catch (err) {
+    console.error('Error fetching storefront homepage data:', err);
+    res.status(500).json({ success: false, message: err.message });
   }
 };
 
@@ -412,6 +513,26 @@ export const trackStorefrontOrder = async (req, res) => {
     }
 
     res.json({
+      success: true,
+      order: {
+        orderNumber: order.orderNumber,
+        customer: {
+          name: order.customer.name,
+          city: order.customer.city,
+          province: order.customer.province,
+          address: order.customer.address,
+        },
+        status: order.status,
+        items: order.items,
+        itemsCount: order.items.length,
+        totalAmount: order.total,
+        paymentMethod: order.paymentMethod,
+        courier: {
+          provider: order.courier?.provider,
+          trackingNumber: order.courier?.trackingNumber || null,
+        },
+        createdAt: order.createdAt,
+      },
       orderNumber: order.orderNumber,
       customerName: order.customer.name,
       city: order.customer.city,

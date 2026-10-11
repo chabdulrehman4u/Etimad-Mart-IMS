@@ -98,6 +98,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/storefront', cors(), storefrontRoutes);
 app.use('/api', cmsRoutes);
 app.use('/api/cms', cmsRoutes);
+app.use('/api/v1', cmsRoutes);
+app.use('/api/v1/storefront', cors(), storefrontRoutes);
 
 // Protected routes (require authentication)
 app.use('/api/categories', authenticate, categoryRoutes);

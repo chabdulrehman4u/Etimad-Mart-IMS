@@ -38,10 +38,18 @@ import {
   deleteBrand,
   getProductReviews,
   createProductReview,
+  getPublicCategories,
+  getAllReviewsAdmin,
+  deleteReview,
 } from '../controllers/cmsController.js';
 import { authenticate } from '../middleware/auth.js';
 
 const router = express.Router();
+
+// ===== CATEGORIES (PUBLIC) =====
+router.get('/category/all', getPublicCategories);
+router.get('/category/getAll', getPublicCategories);
+router.get('/categories/public', getPublicCategories);
 
 // ===== BANNERS =====
 router.get('/banner/all', getPublicBanners);
@@ -94,6 +102,8 @@ router.post('/brand/add', authenticate, createBrand);
 router.delete('/brand/:id', authenticate, deleteBrand);
 
 // ===== REVIEWS =====
+router.get('/review/admin/all', authenticate, getAllReviewsAdmin);
+router.delete('/review/admin/:id', authenticate, deleteReview);
 router.get('/review/:slug', getProductReviews);
 router.post('/review/create/:productSlug/:reviewerId', createProductReview);
 router.post('/review/create', createProductReview);
